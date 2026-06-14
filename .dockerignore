@@ -1,0 +1,7 @@
+# Não mandar pro contexto de build (mantém o build rápido e sem segredos)
+target/
+.mvn/
+*.iml
+.idea/
+.env
+*.log
