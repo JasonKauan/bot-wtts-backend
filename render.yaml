@@ -1,0 +1,88 @@
+# Render Blueprint — fica na RAIZ do repo do backend (bot-wtts-backend).
+# Provisiona backend (Docker) + Postgres + Redis + Evolution de uma vez.
+# Uso: Render -> New -> Blueprint -> conecte o repo bot-wtts-backend.
+#
+# Ligado AUTOMATICO: usuario/senha do banco, URL do Redis, e a API key da Evolution.
+# Preencha no painel (marcados "sync: false"): JDBC URL, segredos (JWT/Mercado Pago)
+# e as URLs .onrender.com (so existem apos criar os servicos).
+# O frontend e um repo separado (bot-wtts-frontend) -> vai na Vercel.
+
+databases:
+  - name: agendabot-db
+    databaseName: agendamento
+    user: agendabot
+    plan: free                # free EXPIRA em 30 dias; use basic-256mb+ em producao
+    region: oregon
+    postgresMajorVersion: "16"
+
+services:
+  # ── Redis (cache da Evolution; o backend nao usa Redis) ─────────────────────
+  - type: redis
+    name: agendabot-redis
+    plan: free
+    region: oregon
+    ipAllowList: []           # somente rede interna
+    maxmemoryPolicy: noeviction
+
+  # ── Backend Spring Boot (Dockerfile na RAIZ deste repo) ─────────────────────
+  - type: web
+    runtime: docker
+    name: agendabot-backend
+    plan: starter             # free dorme apos 15 min ocioso
+    region: oregon
+    # sem rootDir: o repo do backend JA e a raiz; o Dockerfile esta aqui na raiz.
+    envVars:
+      - key: DB_USERNAME
+        fromDatabase: { name: agendabot-db, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: agendabot-db, property: password }
+      # JDBC nao monta sozinha. Cole (host = Internal do agendabot-db):
+      #   jdbc:postgresql://<host-interno>:5432/agendamento
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: JWT_SECRET                 # gere: openssl rand -base64 48
+        sync: false
+      - key: EVOLUTION_KEY              # = AUTHENTICATION_API_KEY da Evolution (auto)
+        fromService: { name: agendabot-evolution, type: web, envVarKey: AUTHENTICATION_API_KEY }
+      - key: EVOLUTION_URL              # https://<url-da-evolution>.onrender.com
+        sync: false
+      - key: APP_BACKEND_URL            # https://<url-deste-backend>.onrender.com
+        sync: false
+      - key: APP_CORS_ORIGINS           # https://<seu-front>.vercel.app
+        sync: false
+      - key: MP_ACCESS_TOKEN            # TEST-... (APP_USR-... so em producao real)
+        sync: false
+      - key: MP_NOTIFICATION_URL        # https://<backend>.onrender.com/api/webhook/mercadopago
+        sync: false
+      - key: SHOW_SQL
+        value: "false"
+
+  # ── Evolution API (WhatsApp) — imagem publica ───────────────────────────────
+  - type: web
+    runtime: image
+    name: agendabot-evolution
+    plan: starter
+    region: oregon
+    image:
+      url: docker.io/atendai/evolution-api:v2.3.7
+    envVars:
+      - key: AUTHENTICATION_API_KEY     # gerada e compartilhada com o backend
+        generateValue: true
+      - key: DATABASE_ENABLED
+        value: "true"
+      - key: DATABASE_PROVIDER
+        value: postgresql
+      # Cole a Internal Database URL do agendabot-db + ?schema=evolution :
+      #   postgresql://user:senha@host:5432/agendamento?schema=evolution
+      - key: DATABASE_CONNECTION_URI
+        sync: false
+      - key: DATABASE_SAVE_DATA_INSTANCE  # mantem a sessao do WhatsApp entre restarts
+        value: "true"
+      - key: CACHE_REDIS_ENABLED
+        value: "true"
+      - key: CACHE_REDIS_URI
+        fromService: { name: agendabot-redis, type: redis, property: connectionString }
+      - key: CACHE_REDIS_PREFIX_KEY
+        value: evolution
+      - key: SERVER_URL                 # https://<url-desta-evolution>.onrender.com
+        sync: false
