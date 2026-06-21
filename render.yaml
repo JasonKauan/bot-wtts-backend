@@ -64,7 +64,7 @@ services:
     plan: starter
     region: oregon
     image:
-      url: docker.io/atendai/evolution-api:v2.3.7
+      url: docker.io/evoapicloud/evolution-api:v2.3.7
     envVars:
       - key: AUTHENTICATION_API_KEY     # gerada e compartilhada com o backend
         generateValue: true
