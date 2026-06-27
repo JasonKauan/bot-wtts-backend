@@ -186,14 +186,20 @@ public class BotService {
         if (data.isBefore(LocalDate.now())) { erroComTentativa(session, telefone, tenant, "Essa data já passou. Qual outra data você prefere?"); return; }
         if (data.isAfter(LocalDate.now().plusDays(30))) { erroComTentativa(session, telefone, tenant, "Só agendamos com até 30 dias de antecedência. Qual outra data?"); return; }
 
+        List<String> horarios = horariosDisponiveis(tenant.getId(), data);
+        if (horarios.isEmpty()) {
+            erroComTentativa(session, telefone, tenant,
+                    "Não há horários disponíveis para *" + formatarData(data) + "* 😕\nQual outra data você prefere?");
+            return;
+        }
+
         session.setDataEscolhida(data);
         session.setEtapa("HORA");
         session.setTentativas(0);
         botSessionRepository.save(session);
 
         enviar(tenant, telefone,
-                "🗓️ *" + formatarData(data) + "* — horários disponíveis:\n\n"
-                + formatarLista(horariosDisponiveis(tenant.getId(), data)));
+                "🗓️ *" + formatarData(data) + "* — horários disponíveis:\n\n" + formatarLista(horarios));
     }
 
     private void handleHora(BotSession session, String msg, String telefone, Tenant tenant) {
@@ -312,9 +318,14 @@ public class BotService {
     }
 
     private List<String> horariosDisponiveis(UUID tenantId, LocalDate data) {
+        LocalDateTime agora = LocalDateTime.now();
         return HORARIOS.stream()
-                .filter(h -> !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(
-                        tenantId, LocalDateTime.of(data, LocalTime.parse(h)), "CONFIRMADO"))
+                .filter(h -> {
+                    LocalDateTime slot = LocalDateTime.of(data, LocalTime.parse(h));
+                    // não oferecer horário que já passou (relevante quando a data é hoje)
+                    return slot.isAfter(agora)
+                            && !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenantId, slot, "CONFIRMADO");
+                })
                 .toList();
     }
 
