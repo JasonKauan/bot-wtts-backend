@@ -40,6 +40,7 @@ public class BotService {
     private final ProfissionalRepository  profissionalRepository;
     private final EvolutionApiService     evolutionApiService;
     private final PlanoService            planoService;
+    private final AiService               aiService;
 
     @Transactional
     public void processMessage(String telefone, String mensagem, String clienteNome, Tenant tenant) {
@@ -134,6 +135,11 @@ public class BotService {
             for (int i = 0; i < servicos.size(); i++)
                 if (normalizar(servicos.get(i).getNome()).equals(norm)) { opcao = i + 1; break; }
 
+        if (opcao == null) { // IA: linguagem natural ("queria fazer a barba")
+            int ai = aiService.escolherOpcao(msg, servicos.stream().map(Servico::getNome).toList());
+            if (ai > 0) opcao = ai;
+        }
+
         if (opcao == null) {
             erroComTentativa(session, telefone, tenant,
                     "Não entendi. Responda com o número do serviço:\n\n" + formatarServicos(servicos));
@@ -163,6 +169,11 @@ public class BotService {
         List<Profissional> profs = profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId());
         Integer opcao = parsearOpcao(msg, profs.size());
 
+        if (opcao == null) { // IA: linguagem natural
+            int ai = aiService.escolherOpcao(msg, profs.stream().map(Profissional::getNome).toList());
+            if (ai > 0) opcao = ai;
+        }
+
         if (opcao == null) {
             erroComTentativa(session, telefone, tenant,
                     "Não entendi. Responda com o número do profissional:\n\n" + formatarProfissionais(profs));
@@ -182,6 +193,7 @@ public class BotService {
 
     private void handleData(BotSession session, String norm, String telefone, Tenant tenant) {
         LocalDate data = parsearData(norm);
+        if (data == null) data = aiService.interpretarData(norm, LocalDate.now()); // IA: "sexta que vem", "dia 20"...
         if (data == null) { erroComTentativa(session, telefone, tenant, "Não entendi a data 😕\nTente: *hoje*, *amanhã* ou *dd/mm*"); return; }
         if (data.isBefore(LocalDate.now())) { erroComTentativa(session, telefone, tenant, "Essa data já passou. Qual outra data você prefere?"); return; }
         if (data.isAfter(LocalDate.now().plusDays(30))) { erroComTentativa(session, telefone, tenant, "Só agendamos com até 30 dias de antecedência. Qual outra data?"); return; }
@@ -205,6 +217,11 @@ public class BotService {
     private void handleHora(BotSession session, String msg, String telefone, Tenant tenant) {
         List<String> disp = horariosDisponiveis(tenant.getId(), session.getDataEscolhida());
         Integer opcao = parsearOpcao(msg, disp.size());
+
+        if (opcao == null) { // IA: "as 3 da tarde" -> 15:00
+            int ai = aiService.escolherOpcao(msg, disp);
+            if (ai > 0) opcao = ai;
+        }
 
         if (opcao == null) { erroComTentativa(session, telefone, tenant, "Não entendi. Responda com o número do horário:\n\n" + formatarLista(disp)); return; }
 
@@ -239,6 +256,12 @@ public class BotService {
 
     private void handleConfirmacao(BotSession session, String norm, String telefone,
                                    String clienteNome, Tenant tenant) {
+        // IA: interpreta confirmação natural ("pode ser", "isso", "não quero")
+        if (!"sim".equals(norm) && !"s".equals(norm) && !"nao".equals(norm) && !"n".equals(norm)) {
+            int ai = aiService.escolherOpcao(norm, List.of("Sim, confirmar o agendamento", "Nao, cancelar"));
+            if (ai == 1) norm = "sim";
+            else if (ai == 2) norm = "nao";
+        }
         if ("sim".equals(norm) || "s".equals(norm)) {
             try {
                 planoService.validarNovoAgendamento(tenant); // Iteração 6: limite do plano

@@ -57,3 +57,15 @@ app:
   backend-url: ${APP_BACKEND_URL:http://localhost:8081}
   # Origens permitidas no CORS, separadas por vírgula. Produção: domínio do frontend.
   cors-origins: ${APP_CORS_ORIGINS:http://localhost:3000,http://localhost:3001}
+
+ai:
+  # Camada de IA do bot. Provedor compatível com OpenAI (URL/chave/modelo por env).
+  # Vazio = bot sem IA (só o menu determinístico).
+  # FREE recomendado: Google Gemini (AI Studio, SEM cartão) — já é o default;
+  # pegue a chave grátis em https://aistudio.google.com/apikey e setar AI_API_KEY.
+  # (OpenRouter "free" exige crédito na conta, senão dá 429 — por isso o default é Gemini.)
+  api:
+    url: ${AI_API_URL:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+    key: ${AI_API_KEY:}
+    model: ${AI_MODEL:gemini-2.0-flash}
+    timeout-ms: ${AI_TIMEOUT_MS:8000}
