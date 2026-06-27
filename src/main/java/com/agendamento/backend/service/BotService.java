@@ -17,10 +17,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Fluxo: SERVICO → PROFISSIONAL → DATA → HORA → CONFIRMACAO
- * (PROFISSIONAL é pulado se o tenant não tiver profissionais cadastrados)
+ * Bot de agendamento com slot-filling: a IA lê a mensagem INTEIRA e preenche
+ * serviço, profissional, data e hora de uma vez — o bot só pergunta o que faltar.
+ * Quem reserva (disponibilidade, conflito, limite de plano) continua determinístico.
+ * Sem IA, degrada para o fluxo de menu por número.
  *
- * TODO Iteração 5: lembretes automáticos (scheduler).
  * TODO Iteração 7: grade horária por profissional (horários ainda hardcoded).
  */
 @Service
@@ -79,16 +80,21 @@ public class BotService {
             return;
         }
 
-        // 3. Resposta a lembrete (sem sessão ativa)
+        // 3. Sessão
         BotSession session = botSessionRepository
                 .findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
         if (session == null) {
+            // Resposta a lembrete (sem sessão ativa)
             if ("sim".equals(norm) || "s".equals(norm) || "nao".equals(norm) || "n".equals(norm)) {
                 handleRespostaLembrete(telefone, norm, tenant);
                 return;
             }
-            iniciarSessao(telefone, tenant);
-            return;
+            // Primeira mensagem (não é saudação): cria a sessão e já tenta ENTENDER a frase inteira.
+            session = BotSession.builder()
+                    .tenantId(tenant.getId()).telefone(telefone)
+                    .etapa("SERVICO").tentativas(0)
+                    .ultimaInteracao(LocalDateTime.now()).build();
+            botSessionRepository.save(session);
         }
 
         // 4. Timeout 30 min
@@ -100,17 +106,29 @@ public class BotService {
 
         session.setUltimaInteracao(LocalDateTime.now());
 
-        switch (session.getEtapa()) {
-            case "SERVICO"      -> handleServico(session, mensagem, norm, telefone, tenant);
-            case "PROFISSIONAL" -> handleProfissional(session, mensagem, telefone, tenant);
-            case "DATA"         -> handleData(session, norm, telefone, tenant);
-            case "HORA"         -> handleHora(session, mensagem, telefone, tenant);
-            case "CONFIRMACAO"  -> handleConfirmacao(session, norm, telefone, clienteNome, tenant);
-            default -> { botSessionRepository.delete(session); iniciarSessao(telefone, tenant); }
+        // CONFIRMAÇÃO é à parte: espera sim/não.
+        if ("CONFIRMACAO".equals(session.getEtapa())) {
+            handleConfirmacao(session, norm, telefone, clienteNome, tenant);
+            return;
+        }
+
+        // ── Slot-filling ─────────────────────────────────────────────────────
+        // Entende a mensagem inteira (serviço, profissional, data e hora) e só
+        // pergunta o que ficar faltando.
+        String slotAntes = proximoSlot(session, tenant);
+        preencherSlots(session, mensagem, norm, tenant);
+        String slotDepois = proximoSlot(session, tenant);
+
+        if (slotDepois.equals(slotAntes)) {
+            // Não conseguimos usar a mensagem para o que faltava → ajuda específica do passo.
+            ajudarSlot(session, slotAntes, mensagem, norm, telefone, tenant);
+        } else {
+            session.setTentativas(0);
+            askSlot(session, slotDepois, telefone, tenant);
         }
     }
 
-    // ── Handlers ──────────────────────────────────────────────────────────────
+    // ── Início / saudação ─────────────────────────────────────────────────────
 
     private BotSession iniciarSessao(String telefone, Tenant tenant) {
         List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
@@ -133,163 +151,185 @@ public class BotService {
         return session;
     }
 
-    private void handleServico(BotSession session, String msg, String norm, String telefone, Tenant tenant) {
+    // ── Slot-filling: preencher ───────────────────────────────────────────────
+
+    /** Preenche o que conseguir da mensagem: seleção do passo atual + IA da frase inteira. */
+    private void preencherSlots(BotSession session, String msg, String norm, Tenant tenant) {
         List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
-        Integer opcao = parsearOpcao(msg, servicos.size());
-        if (opcao == null)
-            for (int i = 0; i < servicos.size(); i++)
-                if (normalizar(servicos.get(i).getNome()).equals(norm)) { opcao = i + 1; break; }
-
-        if (opcao == null) { // IA: linguagem natural ("queria fazer a barba")
-            int ai = aiService.escolherOpcao(msg, servicos.stream().map(Servico::getNome).toList());
-            if (ai > 0) opcao = ai;
-        }
-
-        if (opcao == null) {
-            erroComTentativa(session, telefone, tenant,
-                    "Me diz qual serviço você quer (pode ser pelo número ou pelo nome) 😊\n\n" + formatarServicos(servicos));
-            return;
-        }
-
-        session.setServicoEscolhido(servicos.get(opcao - 1).getNome());
-        session.setTentativas(0);
-
         List<Profissional> profs = profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId());
-        if (profs.isEmpty()) {
-            session.setEtapa("DATA");
-            botSessionRepository.save(session);
-            enviar(tenant, telefone,
-                    "Ótimo! *" + session.getServicoEscolhido() + "* ✂️\n\n" +
-                    "📅 Qual data você prefere?\n_Ex: hoje, amanhã, 15/06_");
-        } else {
-            session.setEtapa("PROFISSIONAL");
-            botSessionRepository.save(session);
-            enviar(tenant, telefone,
-                    "Ótimo! *" + session.getServicoEscolhido() + "* ✂️\n\n" +
-                    "👤 Com qual profissional?\n\n" + formatarProfissionais(profs));
-        }
-    }
 
-    private void handleProfissional(BotSession session, String msg, String telefone, Tenant tenant) {
-        List<Profissional> profs = profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId());
-        Integer opcao = parsearOpcao(msg, profs.size());
+        // (a) Seleção explícita do passo atual (número do menu, nome exato, data digitada).
+        aplicarSelecao(session, msg, norm, servicos, profs, tenant);
 
-        if (opcao == null) { // IA: linguagem natural
-            int ai = aiService.escolherOpcao(msg, profs.stream().map(Profissional::getNome).toList());
-            if (ai > 0) opcao = ai;
+        // (b) IA: entende a mensagem inteira e preenche o que faltar (pula números puros).
+        if (aiService.ativo() && !msg.trim().matches("\\d+")) {
+            AiService.Extracao ex = aiService.extrair(msg,
+                    servicos.stream().map(Servico::getNome).toList(),
+                    profs.stream().map(Profissional::getNome).toList(),
+                    LocalDate.now());
+            if (ex != null) aplicarExtracao(session, ex, servicos, profs, tenant);
         }
 
-        if (opcao == null) {
-            erroComTentativa(session, telefone, tenant,
-                    "Com qual profissional você prefere? 😊\n\n" + formatarProfissionais(profs));
-            return;
-        }
-
-        Profissional prof = profs.get(opcao - 1);
-        session.setProfissionalId(prof.getId());
-        session.setProfissionalEscolhido(prof.getNome());
-        session.setEtapa("DATA");
-        session.setTentativas(0);
         botSessionRepository.save(session);
-
-        enviar(tenant, telefone,
-                "👤 *" + prof.getNome() + "*\n\n📅 Qual data você prefere?\n_Ex: hoje, amanhã, 15/06_");
     }
 
-    private void handleData(BotSession session, String norm, String telefone, Tenant tenant) {
-        LocalDate data = parsearData(norm);
-        if (data == null) data = aiService.interpretarData(norm, LocalDate.now()); // IA: "sexta que vem", "dia 20"...
-        if (data == null) { erroComTentativa(session, telefone, tenant, "Não consegui entender a data 😅 Pode ser *hoje*, *amanhã*, um dia da semana, ou no formato *dd/mm* (ex: 30/06)."); return; }
-        if (data.isBefore(LocalDate.now())) { erroComTentativa(session, telefone, tenant, "Essa data já passou. Qual outra data você prefere?"); return; }
-        if (data.isAfter(LocalDate.now().plusDays(30))) { erroComTentativa(session, telefone, tenant, "Só agendamos com até 30 dias de antecedência. Qual outra data?"); return; }
-
-        List<String> horarios = horariosDisponiveis(tenant.getId(), data);
-        if (horarios.isEmpty()) {
-            LocalDate proxima = proximaDataComVaga(tenant.getId(), data.plusDays(1));
-            String sugestao = (proxima != null)
-                    ? " A próxima data com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
-                    : " Me diz outra data, por favor.";
-            erroComTentativa(session, telefone, tenant,
-                    "Pra *" + formatarData(data) + "* não tenho mais horário 😕" + sugestao);
-            return;
-        }
-
-        session.setDataEscolhida(data);
-        session.setEtapa("HORA");
-        session.setTentativas(0);
-        botSessionRepository.save(session);
-
-        enviar(tenant, telefone,
-                "🗓️ *" + formatarData(data) + "* — horários disponíveis:\n\n" + formatarLista(horarios));
-    }
-
-    private void handleHora(BotSession session, String msg, String telefone, Tenant tenant) {
-        List<String> disp = horariosDisponiveis(tenant.getId(), session.getDataEscolhida());
-        Integer opcao = parsearOpcao(msg, disp.size());
-
-        if (opcao == null) { // IA: extrai o horário pedido (ex.: "as 3 da tarde" -> 15:00)
-            String desejado = aiService.interpretarHorario(msg);
-            if (desejado != null) {
-                int idx = disp.indexOf(desejado);
-                if (idx >= 0) {
-                    opcao = idx + 1; // o horário pedido está livre
-                } else {
-                    // pedido indisponível: sugere o(s) mais próximo(s) da lista real
-                    List<String> sug = sugerirProximos(desejado, disp, 2);
-                    if (!sug.isEmpty()) {
-                        erroComTentativa(session, telefone, tenant,
-                                "Poxa, *" + desejado + "* não tá livre 😕 " + (sug.size() == 1
-                                        ? "Mas tenho *" + sug.get(0) + "* — serve?"
-                                        : "Mas tenho *" + sug.get(0) + "* e *" + sug.get(1) + "*, qual prefere?"));
-                        return;
-                    }
+    /** Seleção determinística referente ao passo que foi perguntado por último. */
+    private void aplicarSelecao(BotSession s, String msg, String norm,
+                                List<Servico> servicos, List<Profissional> profs, Tenant tenant) {
+        switch (s.getEtapa()) {
+            case "SERVICO" -> {
+                if (s.getServicoEscolhido() != null) return;
+                Integer op = parsearOpcao(msg, servicos.size());
+                if (op == null)
+                    for (int i = 0; i < servicos.size(); i++)
+                        if (normalizar(servicos.get(i).getNome()).equals(norm)) { op = i + 1; break; }
+                if (op != null) s.setServicoEscolhido(servicos.get(op - 1).getNome());
+            }
+            case "PROFISSIONAL" -> {
+                if (s.getProfissionalId() != null) return;
+                Integer op = parsearOpcao(msg, profs.size());
+                if (op != null) {
+                    Profissional p = profs.get(op - 1);
+                    s.setProfissionalId(p.getId());
+                    s.setProfissionalEscolhido(p.getNome());
                 }
             }
+            case "DATA" -> {
+                if (s.getDataEscolhida() != null) return;
+                LocalDate d = parsearData(norm);
+                if (d != null && !d.isBefore(LocalDate.now()) && !d.isAfter(LocalDate.now().plusDays(30)))
+                    s.setDataEscolhida(d);
+            }
+            case "HORA" -> {
+                if (s.getHoraEscolhida() != null || s.getDataEscolhida() == null) return;
+                List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+                Integer op = parsearOpcao(msg, disp.size());
+                if (op != null) s.setHoraEscolhida(disp.get(op - 1));
+            }
         }
+    }
 
-        if (opcao == null) { // cliente mencionou um período (manhã/tarde/noite)?
-            List<String> doPeriodo = filtrarPorPeriodo(disp, msg);
-            if (doPeriodo != null) {
-                erroComTentativa(session, telefone, tenant, doPeriodo.isEmpty()
-                        ? "Nesse período não tenho vaga nesse dia 😕 Mas tenho " + juntarHorarios(disp) + " — qual rola?"
-                        : "Tenho " + juntarHorarios(doPeriodo) + " — qual fica bom? 😊");
+    /** Preenche, a partir do que a IA extraiu, só os campos ainda vazios e válidos. */
+    private void aplicarExtracao(BotSession s, AiService.Extracao ex,
+                                 List<Servico> servicos, List<Profissional> profs, Tenant tenant) {
+        if (s.getServicoEscolhido() == null && ex.servico != null)
+            servicos.stream().filter(sv -> nomeBate(sv.getNome(), ex.servico)).findFirst()
+                    .ifPresent(sv -> s.setServicoEscolhido(sv.getNome()));
+
+        if (s.getProfissionalId() == null && ex.profissional != null)
+            profs.stream().filter(p -> nomeBate(p.getNome(), ex.profissional)).findFirst()
+                    .ifPresent(p -> { s.setProfissionalId(p.getId()); s.setProfissionalEscolhido(p.getNome()); });
+
+        if (s.getDataEscolhida() == null && ex.data != null
+                && !ex.data.isBefore(LocalDate.now()) && !ex.data.isAfter(LocalDate.now().plusDays(30)))
+            s.setDataEscolhida(ex.data);
+
+        if (s.getHoraEscolhida() == null && ex.hora != null && s.getDataEscolhida() != null
+                && horariosDisponiveis(tenant.getId(), s.getDataEscolhida()).contains(ex.hora))
+            s.setHoraEscolhida(ex.hora);
+    }
+
+    /** Primeiro campo ainda faltando, ou CONFIRMACAO se tudo pronto. */
+    private String proximoSlot(BotSession s, Tenant tenant) {
+        if (s.getServicoEscolhido() == null) return "SERVICO";
+        if (s.getProfissionalId() == null
+                && !profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId()).isEmpty()) return "PROFISSIONAL";
+        if (s.getDataEscolhida() == null) return "DATA";
+        if (s.getHoraEscolhida() == null) return "HORA";
+        return "CONFIRMACAO";
+    }
+
+    // ── Slot-filling: perguntar o próximo passo ───────────────────────────────
+
+    private void askSlot(BotSession s, String slot, String telefone, Tenant tenant) {
+        s.setEtapa(slot);
+        botSessionRepository.save(s);
+        switch (slot) {
+            case "SERVICO" -> enviar(tenant, telefone,
+                    "Qual serviço você quer? 😊\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+            case "PROFISSIONAL" -> enviar(tenant, telefone,
+                    resumoParcial(s) + "👤 Com qual profissional?\n\n" + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+            case "DATA" -> enviar(tenant, telefone,
+                    resumoParcial(s) + "📅 Pra qual dia? _(hoje, amanhã ou dd/mm)_");
+            case "HORA" -> {
+                List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+                if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
+                enviar(tenant, telefone, "🗓️ *" + formatarData(s.getDataEscolhida()) + "* — horários:\n\n" + formatarLista(disp));
+            }
+            case "CONFIRMACAO" -> enviar(tenant, telefone, resumoConfirmacao(s));
+        }
+    }
+
+    /** A data escolhida ficou sem vaga: limpa e sugere a próxima com horário livre. */
+    private void trocarParaProximaData(BotSession s, String telefone, Tenant tenant) {
+        LocalDate cheia = s.getDataEscolhida();
+        s.setDataEscolhida(null);
+        s.setEtapa("DATA");
+        botSessionRepository.save(s);
+        LocalDate proxima = proximaDataComVaga(tenant.getId(), cheia.plusDays(1));
+        String sugestao = (proxima != null)
+                ? " A próxima com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
+                : " Me diz outra data, por favor.";
+        enviar(tenant, telefone, "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕" + sugestao);
+    }
+
+    // ── Slot-filling: ajuda quando não entendeu o passo atual ─────────────────
+
+    private void ajudarSlot(BotSession s, String slot, String msg, String norm, String telefone, Tenant tenant) {
+        switch (slot) {
+            case "SERVICO" -> erroComTentativa(s, telefone, tenant,
+                    "Me diz qual serviço você quer (pode ser pelo número ou pelo nome) 😊\n\n"
+                    + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+            case "PROFISSIONAL" -> erroComTentativa(s, telefone, tenant,
+                    "Com qual profissional você prefere? 😊\n\n"
+                    + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+            case "DATA" -> ajudarData(s, norm, telefone, tenant);
+            case "HORA" -> ajudarHora(s, msg, telefone, tenant);
+        }
+    }
+
+    private void ajudarData(BotSession s, String norm, String telefone, Tenant tenant) {
+        LocalDate d = parsearData(norm);
+        if (d == null) d = aiService.interpretarData(norm, LocalDate.now());
+        if (d != null && d.isBefore(LocalDate.now())) {
+            erroComTentativa(s, telefone, tenant, "Essa data já passou 😅 Qual outra você prefere?");
+        } else if (d != null && d.isAfter(LocalDate.now().plusDays(30))) {
+            erroComTentativa(s, telefone, tenant, "Só agendo com até 30 dias de antecedência. Qual outra data?");
+        } else {
+            erroComTentativa(s, telefone, tenant,
+                    "Não consegui entender a data 😅 Pode ser *hoje*, *amanhã*, um dia da semana ou *dd/mm* (ex: 30/06).");
+        }
+    }
+
+    private void ajudarHora(BotSession s, String msg, String telefone, Tenant tenant) {
+        List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+        if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
+
+        // Tentou um horário específico que não está livre? Sugere o(s) mais próximo(s) da lista real.
+        String desejado = aiService.interpretarHorario(msg);
+        if (desejado != null && !disp.contains(desejado)) {
+            List<String> sug = sugerirProximos(desejado, disp, 2);
+            if (!sug.isEmpty()) {
+                erroComTentativa(s, telefone, tenant, "Poxa, *" + desejado + "* não tá livre 😕 " + (sug.size() == 1
+                        ? "Mas tenho *" + sug.get(0) + "* — serve?"
+                        : "Mas tenho *" + sug.get(0) + "* e *" + sug.get(1) + "*, qual prefere?"));
                 return;
             }
         }
 
-        if (opcao == null) { erroComTentativa(session, telefone, tenant, "Tenho estes horários — qual fica melhor pra você? 😊\n\n" + formatarLista(disp)); return; }
-
-        String hora = disp.get(opcao - 1);
-        LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(hora));
-
-        if (agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenant.getId(), dataHora, "CONFIRMADO")) {
-            List<String> atualizados = horariosDisponiveis(tenant.getId(), session.getDataEscolhida());
-            if (atualizados.isEmpty()) {
-                enviar(tenant, telefone, "Não há mais horários disponíveis. Qual outra data?");
-                session.setEtapa("DATA"); session.setTentativas(0);
-            } else {
-                List<String> sug = sugerirProximos(hora, atualizados, 2);
-                enviar(tenant, telefone, "Esse horário acabou de ser reservado 😕 " + (sug.size() == 1
-                        ? "Mas ainda tenho *" + sug.get(0) + "* — serve?"
-                        : "Mas ainda tenho *" + sug.get(0) + "* e *" + sug.get(1) + "*, qual prefere?"));
-            }
-            botSessionRepository.save(session); return;
+        // Mencionou um período (manhã/tarde/noite)?
+        List<String> doPeriodo = filtrarPorPeriodo(disp, msg);
+        if (doPeriodo != null) {
+            erroComTentativa(s, telefone, tenant, doPeriodo.isEmpty()
+                    ? "Nesse período não tenho vaga nesse dia 😕 Mas tenho " + juntarHorarios(disp) + " — qual rola?"
+                    : "Tenho " + juntarHorarios(doPeriodo) + " — qual fica bom? 😊");
+            return;
         }
 
-        session.setHoraEscolhida(hora);
-        session.setEtapa("CONFIRMACAO");
-        session.setTentativas(0);
-        botSessionRepository.save(session);
-
-        String profTexto = session.getProfissionalEscolhido() != null
-                ? "\n👤 *Profissional:* " + session.getProfissionalEscolhido() : "";
-        enviar(tenant, telefone,
-                "Confirmar agendamento?\n\n✂️ *Serviço:* " + session.getServicoEscolhido()
-                + profTexto
-                + "\n📅 *Data:* " + formatarData(session.getDataEscolhida())
-                + "\n⏰ *Horário:* " + hora
-                + "\n\nPosso confirmar? Responda *sim* 👍 ou *não*.");
+        erroComTentativa(s, telefone, tenant, "Tenho estes horários — qual fica melhor pra você? 😊\n\n" + formatarLista(disp));
     }
+
+    // ── Confirmação ───────────────────────────────────────────────────────────
 
     private void handleConfirmacao(BotSession session, String norm, String telefone,
                                    String clienteNome, Tenant tenant) {
@@ -311,6 +351,20 @@ public class BotService {
                 return;
             }
             LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(session.getHoraEscolhida()));
+
+            // Re-checa conflito: alguém pode ter reservado durante a conversa.
+            if (agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenant.getId(), dataHora, "CONFIRMADO")) {
+                session.setHoraEscolhida(null);
+                session.setEtapa("HORA");
+                session.setTentativas(0);
+                botSessionRepository.save(session);
+                List<String> disp = horariosDisponiveis(tenant.getId(), session.getDataEscolhida());
+                enviar(tenant, telefone, disp.isEmpty()
+                        ? "Ihh, esse horário acabou de ser reservado 😕 E não sobrou mais nada nesse dia. Qual outra data?"
+                        : "Ihh, esse horário acabou de ser reservado 😕 Mas ainda tenho " + juntarHorarios(disp) + " — qual prefere?");
+                return;
+            }
+
             Agendamento ag = Agendamento.builder()
                     .tenantId(tenant.getId())
                     .clienteNome(clienteNome != null ? clienteNome : telefone)
@@ -320,9 +374,10 @@ public class BotService {
                     .profissionalId(session.getProfissionalId())
                     .dataHora(dataHora).status("CONFIRMADO").build();
             agendamentoRepository.save(ag);
+            String servicoOk = session.getServicoEscolhido();
             botSessionRepository.delete(session);
             log.info("[{}] Agendamento salvo — {}", tenant.getId(), telefone);
-            String ok = aiService.redigir("O agendamento de *" + session.getServicoEscolhido()
+            String ok = aiService.redigir("O agendamento de *" + servicoOk
                     + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
             enviar(tenant, telefone, ok != null ? ok : "✅ Agendado! Até lá 😊");
 
@@ -349,7 +404,7 @@ public class BotService {
         if ("sim".equals(norm) || "s".equals(norm)) {
             enviar(tenant, telefone,
                     "✅ Ótimo! Te esperamos em *"
-                    + ag.getDataHora().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM 'às' HH:mm"))
+                    + ag.getDataHora().format(DateTimeFormatter.ofPattern("dd/MM 'às' HH:mm"))
                     + "*. 😊");
         } else {
             ag.setStatus("CANCELADO");
@@ -389,6 +444,34 @@ public class BotService {
                             && !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenantId, slot, "CONFIRMADO");
                 })
                 .toList();
+    }
+
+    /** Prefixo com o que já sabemos: "*Corte* com *Raphael* 👍\n\n". Vazio se nada definido. */
+    private String resumoParcial(BotSession s) {
+        String serv = s.getServicoEscolhido();
+        String prof = s.getProfissionalEscolhido();
+        if (serv == null && prof == null) return "";
+        StringBuilder sb = new StringBuilder();
+        if (serv != null) sb.append("*").append(serv).append("*");
+        if (prof != null) sb.append(serv != null ? " com *" : "*").append(prof).append("*");
+        return sb.append(" 👍\n\n").toString();
+    }
+
+    private String resumoConfirmacao(BotSession s) {
+        String profTexto = s.getProfissionalEscolhido() != null
+                ? "\n👤 *Profissional:* " + s.getProfissionalEscolhido() : "";
+        return "Confirmar agendamento?\n\n✂️ *Serviço:* " + s.getServicoEscolhido()
+                + profTexto
+                + "\n📅 *Data:* " + formatarData(s.getDataEscolhida())
+                + "\n⏰ *Horário:* " + s.getHoraEscolhida()
+                + "\n\nPosso confirmar? Responda *sim* 👍 ou *não*.";
+    }
+
+    /** Dois nomes "batem" se forem iguais ou um contiver o outro (ex.: "Raphael" ~ "Raphael Silva"). */
+    private boolean nomeBate(String a, String b) {
+        if (a == null || b == null) return false;
+        String x = normalizar(a), y = normalizar(b);
+        return x.equals(y) || x.contains(y) || y.contains(x);
     }
 
     private String formatarServicos(List<Servico> servicos) {

@@ -28,6 +28,9 @@ public class AiService {
 
     private final RestTemplate http;
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
     @Value("${ai.api.url:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}")
     private String url;
 
@@ -141,6 +144,57 @@ public class AiService {
             return String.format("%02d:%02d", Integer.parseInt(p[0]), Integer.parseInt(p[1]));
         }
         return null;
+    }
+
+    /** Slot-filling: lê a mensagem inteira e extrai serviço, profissional, data e hora de uma vez. Null se IA off/falha. */
+    public Extracao extrair(String mensagem, List<String> servicos, List<String> profissionais, LocalDate hoje) {
+        if (!ativo()) return null;
+        String sys = "Voce extrai dados de um pedido de agendamento por WhatsApp. " +
+                "Servicos disponiveis: " + servicos + ". " +
+                "Profissionais: " + (profissionais.isEmpty() ? "nenhum" : profissionais) + ". " +
+                "Hoje e " + hoje + " (formato AAAA-MM-DD). " +
+                "Responda SOMENTE um JSON valido, sem texto extra: " +
+                "{\"servico\": <nome EXATO da lista ou null>, \"profissional\": <nome EXATO da lista ou null>, " +
+                "\"data\": <\"AAAA-MM-DD\" ou null>, \"hora\": <\"HH:MM\" ou null>}. " +
+                "Preencha somente o que o cliente realmente mencionou; o resto deixe null. Nunca invente.";
+        String resp = call(sys, "Mensagem do cliente: " + mensagem, 120, 0.0);
+        if (resp == null) return null;
+        try {
+            int a = resp.indexOf('{'), b = resp.lastIndexOf('}');
+            if (a < 0 || b <= a) return null;
+            Map<?, ?> m = JSON.readValue(resp.substring(a, b + 1), Map.class);
+            Extracao e = new Extracao();
+            e.servico = texto(m.get("servico"));
+            e.profissional = texto(m.get("profissional"));
+            String d = texto(m.get("data"));
+            if (d != null) try { e.data = LocalDate.parse(d); } catch (Exception ignored) {}
+            String h = texto(m.get("hora"));
+            if (h != null) {
+                Matcher mm = Pattern.compile("([01]?\\d|2[0-3]):([0-5]\\d)").matcher(h);
+                if (mm.find()) {
+                    String[] p = mm.group().split(":");
+                    e.hora = String.format("%02d:%02d", Integer.parseInt(p[0]), Integer.parseInt(p[1]));
+                }
+            }
+            return e;
+        } catch (Exception ex) {
+            log.warn("Falha ao interpretar extração da IA: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private String texto(Object o) {
+        if (o == null) return null;
+        String s = String.valueOf(o).trim();
+        return (s.isEmpty() || s.equalsIgnoreCase("null")) ? null : s;
+    }
+
+    /** Campos extraídos de uma mensagem (qualquer um pode ser null). */
+    public static class Extracao {
+        public String servico;
+        public String profissional;
+        public LocalDate data;
+        public String hora;
     }
 
     private Integer primeiroNumero(String s) {
