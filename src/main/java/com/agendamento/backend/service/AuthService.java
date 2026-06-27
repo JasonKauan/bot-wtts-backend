@@ -85,6 +85,12 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário inativo.");
         }
 
+        // SUPERADMIN não tem tenant e não loga pelo painel do dono — deve usar /api/admin/login.
+        // (Sem isto, generateToken faria NPE em tenantId.toString() → 500.)
+        if (usuario.getTenantId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciais inválidas.");
+        }
+
         String token = jwtService.generateToken(usuario.getId(), usuario.getTenantId(), usuario.getRole());
         return new AuthResponse(token, null);
     }
