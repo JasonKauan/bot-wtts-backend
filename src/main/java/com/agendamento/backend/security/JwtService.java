@@ -41,6 +41,17 @@ public class JwtService {
                 .compact();
     }
 
+    /** Token de SUPERADMIN: SEM claim tenant_id (papel não pertence a nenhum tenant). */
+    public String generateAdminToken(UUID userId, String role) {
+        return Jwts.builder()
+                .subject(userId.toString())
+                .claim("role", role)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .signWith(getSignKey())
+                .compact();
+    }
+
     public Claims extractClaims(String token) {
         return Jwts.parser()
                 .verifyWith(getSignKey())

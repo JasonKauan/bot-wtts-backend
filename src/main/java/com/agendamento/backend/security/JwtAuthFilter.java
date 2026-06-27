@@ -38,26 +38,32 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 if (header != null && header.startsWith("Bearer ")) {
                     String token = header.substring(7);
                     Claims claims = jwtService.extractClaims(token);
-
-                    UUID tenantId = UUID.fromString(claims.get("tenant_id", String.class));
-                    TenantContext.set(tenantId);
+                    String role = claims.get("role", String.class);
 
                     var auth = new UsernamePasswordAuthenticationToken(
                             claims.getSubject(),
                             null,
-                            List.of(new SimpleGrantedAuthority("ROLE_" + claims.get("role", String.class)))
+                            List.of(new SimpleGrantedAuthority("ROLE_" + role))
                     );
                     SecurityContextHolder.getContext().setAuthentication(auth);
 
-                    // Iteração 6: trial/assinatura vencida bloqueia o painel com 402,
-                    // exceto auth e a própria página de assinatura (senão não dá para renovar).
-                    if (bloqueadoPorAssinatura(request, tenantId)) {
-                        SecurityContextHolder.clearContext();
-                        response.setStatus(402);
-                        response.setContentType("application/json;charset=UTF-8");
-                        response.getWriter().write(
-                                "{\"message\":\"Assinatura vencida. Renove na página de assinatura para continuar.\"}");
-                        return;
+                    // SUPERADMIN não tem tenant: token sem claim tenant_id. Não seta o
+                    // TenantContext e não passa pelo bloqueio 402 (Fase 1 do painel admin).
+                    String tenantClaim = claims.get("tenant_id", String.class);
+                    if (tenantClaim != null && !tenantClaim.isBlank()) {
+                        UUID tenantId = UUID.fromString(tenantClaim);
+                        TenantContext.set(tenantId);
+
+                        // Iteração 6: trial/assinatura vencida bloqueia o painel com 402,
+                        // exceto auth e a própria página de assinatura (senão não dá para renovar).
+                        if (bloqueadoPorAssinatura(request, tenantId)) {
+                            SecurityContextHolder.clearContext();
+                            response.setStatus(402);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write(
+                                    "{\"message\":\"Assinatura vencida. Renove na página de assinatura para continuar.\"}");
+                            return;
+                        }
                     }
                 }
             } catch (JwtException | IllegalArgumentException e) {
@@ -71,7 +77,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private boolean bloqueadoPorAssinatura(HttpServletRequest request, UUID tenantId) {
         String path = request.getRequestURI();
-        if (path.startsWith("/api/auth/") || path.startsWith("/api/assinatura")) return false;
+        if (path.startsWith("/api/auth/") || path.startsWith("/api/assinatura")
+                || path.startsWith("/api/admin")) return false;
 
         Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
         if (tenant == null || !tenant.isAssinaturaVencida()) return false;

@@ -18,7 +18,8 @@ public class Usuario {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "tenant_id", nullable = false)
+    /** Null para SUPERADMIN (papel sem tenant — painel admin, Fase 1). */
+    @Column(name = "tenant_id")
     private UUID tenantId;
 
     @Column(nullable = false, unique = true)
@@ -27,7 +28,7 @@ public class Usuario {
     @Column(nullable = false)
     private String senha;
 
-    /** Iteração 3: apenas "OWNER". Iteração 7: adicionar "STAFF". */
+    /** "OWNER" (dono do estabelecimento) ou "SUPERADMIN" (back-office, sem tenant). */
     @Column(nullable = false)
     private String role;
 

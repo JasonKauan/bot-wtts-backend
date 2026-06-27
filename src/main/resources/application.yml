@@ -57,6 +57,11 @@ app:
   backend-url: ${APP_BACKEND_URL:http://localhost:8081}
   # Origens permitidas no CORS, separadas por vírgula. Produção: domínio do frontend.
   cors-origins: ${APP_CORS_ORIGINS:http://localhost:3000,http://localhost:3001}
+  # Seed do 1º SUPERADMIN (back-office). Vazio = não cria. A senha NUNCA é commitada:
+  # setar SUPERADMIN_EMAIL e SUPERADMIN_PASSWORD no painel do Render (e no .env local).
+  superadmin:
+    email: ${SUPERADMIN_EMAIL:}
+    password: ${SUPERADMIN_PASSWORD:}
 
 ai:
   # Camada de IA do bot. Provedor compatível com OpenAI (URL/chave/modelo por env).

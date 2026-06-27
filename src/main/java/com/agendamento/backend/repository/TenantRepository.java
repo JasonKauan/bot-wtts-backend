@@ -8,4 +8,7 @@ import java.util.UUID;
 
 public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     List<Tenant> findByAtivoTrue();
+
+    /** Lista de clientes do painel admin — mais recentes primeiro. */
+    List<Tenant> findAllByOrderByCriadoEmDesc();
 }
