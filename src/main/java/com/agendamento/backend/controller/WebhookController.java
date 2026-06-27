@@ -4,6 +4,7 @@ import com.agendamento.backend.dto.WebhookPayload;
 import com.agendamento.backend.entity.Tenant;
 import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.service.BotService;
+import com.agendamento.backend.service.MessageDedup;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -23,8 +24,9 @@ import java.util.UUID;
 @Slf4j
 public class WebhookController {
 
-    private final BotService      botService;
+    private final BotService       botService;
     private final TenantRepository tenantRepository;
+    private final MessageDedup     messageDedup;
 
     @PostMapping("/api/webhook/whatsapp")
     public ResponseEntity<Void> receberMensagem(
@@ -32,6 +34,10 @@ public class WebhookController {
             @RequestBody WebhookPayload payload) {
 
         if (payload.isFromMe() || !payload.isMensagemRecebida()) {
+            return ResponseEntity.ok().build();
+        }
+        // Dedup: a Evolution reenvia o mesmo webhook às vezes → não responder em duplicidade.
+        if (messageDedup.jaProcessada(payload.messageId())) {
             return ResponseEntity.ok().build();
         }
 

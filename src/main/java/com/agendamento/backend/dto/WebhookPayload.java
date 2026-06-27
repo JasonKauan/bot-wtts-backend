@@ -76,6 +76,11 @@ public class WebhookPayload {
                 .replace("@c.us", "");
     }
 
+    /** ID único da mensagem no WhatsApp (para deduplicar reenvios da Evolution). */
+    public String messageId() {
+        return (data != null && data.getKey() != null) ? data.getKey().getId() : null;
+    }
+
     /** Mensagem enviada pelo próprio bot (ignorar para não criar loop). */
     public boolean isFromMe() {
         return data != null

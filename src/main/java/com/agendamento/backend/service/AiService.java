@@ -50,14 +50,30 @@ public class AiService {
         return apiKey != null && !apiKey.isBlank();
     }
 
-    /** Chamada de chat. Devolve o texto da resposta, ou null em qualquer falha. */
+    /** Chamada de extração (curta, determinística, temp baixa). Devolve o texto, ou null. */
     public String chat(String system, String user) {
+        return call(system, user, 24, 0.1);
+    }
+
+    /**
+     * Gera UMA frase curta e natural para a situação dada (tom de recepcionista no WhatsApp).
+     * Não inventa fatos, não faz listas. Devolve null em falha → quem chama usa o texto fixo.
+     */
+    public String redigir(String situacao) {
+        return call(
+                "Voce e a recepcionista simpatica de um estabelecimento, atendendo no WhatsApp. " +
+                "Escreva UMA frase curta, calorosa e natural (ate ~22 palavras, no maximo 1 emoji). " +
+                "Nao invente informacoes, nao faca listas, use *texto* para negrito. Responda so a frase.",
+                situacao, 80, 0.6);
+    }
+
+    private String call(String system, String user, int maxTokens, double temperature) {
         if (!ativo()) return null;
         try {
             Map<String, Object> body = Map.of(
                     "model", model,
-                    "temperature", 0.1,
-                    "max_tokens", 24,
+                    "temperature", temperature,
+                    "max_tokens", maxTokens,
                     "messages", List.of(
                             Map.of("role", "system", "content", system),
                             Map.of("role", "user", "content", user)
@@ -107,6 +123,22 @@ public class AiService {
         Matcher m = Pattern.compile("(\\d{4})-(\\d{2})-(\\d{2})").matcher(resp);
         if (m.find()) {
             try { return LocalDate.parse(m.group()); } catch (Exception e) { return null; }
+        }
+        return null;
+    }
+
+    /** Extrai o horário que o cliente pediu, no formato HH:mm (mesmo que indisponível). Null se não houver. */
+    public String interpretarHorario(String msg) {
+        if (!ativo()) return null;
+        String resp = chat(
+                "Extraia o horario que o cliente quer agendar, no formato HH:MM (24h). " +
+                "Ex: 'as 3 da tarde' -> 15:00; 'umas 9 da manha' -> 09:00. Se nao houver horario claro, responda NENHUM.",
+                "Mensagem: " + msg);
+        if (resp == null) return null;
+        Matcher m = Pattern.compile("([01]?\\d|2[0-3]):([0-5]\\d)").matcher(resp);
+        if (m.find()) {
+            String[] p = m.group().split(":");
+            return String.format("%02d:%02d", Integer.parseInt(p[0]), Integer.parseInt(p[1]));
         }
         return null;
     }
