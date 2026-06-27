@@ -97,12 +97,59 @@ public class EvolutionApiService {
         log.info("Webhook configurado: {} | status: {}", instanceName, resp.getStatusCode());
     }
 
+    // ── Conexão / QR (WhatsApp pelo painel) ────────────────────────────────────
+
+    /** Estado da conexão da instância: "open", "connecting" ou "close". */
+    public String estadoConexao(String instanceName) {
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    apiUrl + "/instance/connectionState/" + instanceName,
+                    HttpMethod.GET, new HttpEntity<>(apiHeaders()), Map.class);
+            if (resp.getBody() != null && resp.getBody().get("instance") instanceof Map<?, ?> inst
+                    && inst.get("state") != null) {
+                return String.valueOf(inst.get("state"));
+            }
+            return "close";
+        } catch (RestClientException e) {
+            return "close";
+        }
+    }
+
+    /** Dispara o connect e devolve o QR (data URI base64), ou null se ainda não houver. */
+    public String obterQrCode(String instanceName) {
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    apiUrl + "/instance/connect/" + instanceName,
+                    HttpMethod.GET, new HttpEntity<>(apiHeaders()), Map.class);
+            if (resp.getBody() != null && resp.getBody().get("base64") != null) {
+                return String.valueOf(resp.getBody().get("base64"));
+            }
+            return null;
+        } catch (RestClientException e) {
+            return null;
+        }
+    }
+
+    public boolean instanciaExiste(String instanceName) {
+        try {
+            restTemplate.exchange(apiUrl + "/instance/connectionState/" + instanceName,
+                    HttpMethod.GET, new HttpEntity<>(apiHeaders()), Map.class);
+            return true;
+        } catch (RestClientException e) {
+            return false;
+        }
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private ResponseEntity<String> post(String url, Object body) {
+    private HttpHeaders apiHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("apikey", apiKey);
-        return restTemplate.postForEntity(url, new HttpEntity<>(body, headers), String.class);
+        return headers;
+    }
+
+    private ResponseEntity<String> post(String url, Object body) {
+        return restTemplate.postForEntity(url, new HttpEntity<>(body, apiHeaders()), String.class);
     }
 }
