@@ -1,6 +1,7 @@
 package com.agendamento.backend.controller;
 
 import com.agendamento.backend.dto.admin.AdminLoginRequest;
+import com.agendamento.backend.dto.admin.AuditoriaDto;
 import com.agendamento.backend.dto.admin.ClienteResumoDto;
 import com.agendamento.backend.dto.admin.CriarClienteRequest;
 import com.agendamento.backend.dto.admin.PlanoRequest;
@@ -12,6 +13,7 @@ import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.repository.UsuarioRepository;
 import com.agendamento.backend.service.AdminAuthService;
 import com.agendamento.backend.service.AdminClienteService;
+import com.agendamento.backend.service.AuditoriaService;
 import com.agendamento.backend.service.EvolutionApiService;
 import com.agendamento.backend.service.RateLimiterService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +39,7 @@ public class AdminController {
 
     private final AdminAuthService adminAuthService;
     private final AdminClienteService adminClienteService;
+    private final AuditoriaService auditoriaService;
     private final TenantRepository tenantRepository;
     private final UsuarioRepository usuarioRepository;
     private final EvolutionApiService evolutionApiService;
@@ -95,6 +98,12 @@ public class AdminController {
     @PostMapping("/clientes/{id}/reativar")
     public void reativar(@PathVariable UUID id) {
         adminClienteService.definirAtivo(id, true);
+    }
+
+    /** Histórico de ações do back-office (mais recentes primeiro). */
+    @GetMapping("/auditoria")
+    public List<AuditoriaDto> auditoria() {
+        return auditoriaService.listar();
     }
 
     private ClienteResumoDto toResumo(Tenant t) {

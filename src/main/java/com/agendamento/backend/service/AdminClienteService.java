@@ -39,6 +39,7 @@ public class AdminClienteService {
     private final UsuarioRepository usuarioRepository;
     private final AuthService authService;
     private final PasswordEncoder passwordEncoder;
+    private final AuditoriaService auditoriaService;
 
     /** Onboard de cliente. Devolve a senha provisória só se foi gerada (pro vendedor repassar). */
     @Transactional
@@ -51,10 +52,13 @@ public class AdminClienteService {
                 req.getNome(), req.getTelefone(), req.getEmail(), senha, trialDias);
 
         // Opcional: já ativa um plano pago no onboard.
+        String detalhe = "trial " + trialDias + "d";
         if (req.getPlano() != null) {
             aplicarPlano(tenant, req.getPlano());
             tenantRepository.save(tenant);
+            detalhe += " + " + req.getPlano().getPlano();
         }
+        auditoriaService.registrar("CRIAR_CLIENTE", tenant.getId(), tenant.getNome(), detalhe);
         return new SenhaResponse(tenant.getId(), gerada ? senha : null);
     }
 
@@ -65,12 +69,13 @@ public class AdminClienteService {
         aplicarPlano(t, req);
         tenantRepository.save(t);
         log.info("[admin] plano do tenant {} -> {} (modo {})", id, req.getPlano(), req.getModo());
+        auditoriaService.registrar("ALTERAR_PLANO", id, t.getNome(), descricaoPlano(req));
     }
 
     /** Reset de senha do dono. Devolve a senha provisória só se foi gerada. */
     @Transactional
     public SenhaResponse resetarSenha(UUID id, ResetSenhaRequest req) {
-        buscar(id); // valida que o cliente existe
+        Tenant t = buscar(id); // valida que o cliente existe
         Usuario dono = usuarioRepository.findFirstByTenantId(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dono não encontrado."));
 
@@ -79,6 +84,7 @@ public class AdminClienteService {
         dono.setSenha(passwordEncoder.encode(senha));
         usuarioRepository.save(dono);
         log.info("[admin] senha do dono do tenant {} resetada", id);
+        auditoriaService.registrar("RESETAR_SENHA", id, t.getNome(), gerada ? "gerada" : "definida");
         return new SenhaResponse(id, gerada ? senha : null);
     }
 
@@ -89,6 +95,7 @@ public class AdminClienteService {
         t.setAtivo(ativo);
         tenantRepository.save(t);
         log.info("[admin] tenant {} {}", id, ativo ? "reativado" : "suspenso");
+        auditoriaService.registrar(ativo ? "REATIVAR" : "SUSPENDER", id, t.getNome(), null);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -116,6 +123,16 @@ public class AdminClienteService {
         t.setPlano(req.getPlano());
         if (trial) t.setTrialExpiraEm(nova);
         else       t.setAssinaturaExpiraEm(nova);
+    }
+
+    private String descricaoPlano(PlanoRequest req) {
+        String valor = switch (req.getModo() == null ? "" : req.getModo()) {
+            case "meses" -> "meses=" + (req.getMeses() != null ? req.getMeses() : 1);
+            case "dias"  -> "dias=" + (req.getDias() != null ? req.getDias() : 30);
+            case "data"  -> "data=" + req.getData();
+            default -> "";
+        };
+        return "plano=" + req.getPlano() + " modo=" + req.getModo() + " " + valor;
     }
 
     private Tenant buscar(UUID id) {
