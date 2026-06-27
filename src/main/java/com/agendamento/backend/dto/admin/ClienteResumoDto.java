@@ -16,6 +16,7 @@ public record ClienteResumoDto(
         String telefoneWhatsapp,
         String emailDono,
         Plano plano,
+        boolean ativo,
         boolean vencido,
         LocalDateTime trialExpiraEm,
         LocalDateTime assinaturaExpiraEm,

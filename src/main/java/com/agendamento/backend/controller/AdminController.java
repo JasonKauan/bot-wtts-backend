@@ -2,11 +2,16 @@ package com.agendamento.backend.controller;
 
 import com.agendamento.backend.dto.admin.AdminLoginRequest;
 import com.agendamento.backend.dto.admin.ClienteResumoDto;
+import com.agendamento.backend.dto.admin.CriarClienteRequest;
+import com.agendamento.backend.dto.admin.PlanoRequest;
+import com.agendamento.backend.dto.admin.ResetSenhaRequest;
+import com.agendamento.backend.dto.admin.SenhaResponse;
 import com.agendamento.backend.dto.auth.AuthResponse;
 import com.agendamento.backend.entity.Tenant;
 import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.repository.UsuarioRepository;
 import com.agendamento.backend.service.AdminAuthService;
+import com.agendamento.backend.service.AdminClienteService;
 import com.agendamento.backend.service.EvolutionApiService;
 import com.agendamento.backend.service.RateLimiterService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +36,7 @@ import java.util.UUID;
 public class AdminController {
 
     private final AdminAuthService adminAuthService;
+    private final AdminClienteService adminClienteService;
     private final TenantRepository tenantRepository;
     private final UsuarioRepository usuarioRepository;
     private final EvolutionApiService evolutionApiService;
@@ -60,12 +66,43 @@ public class AdminController {
         return Map.of("estado", estado, "conectado", "open".equalsIgnoreCase(estado));
     }
 
+    /** Onboard de cliente. Devolve a senha provisória quando gerada (pro vendedor repassar). */
+    @PostMapping("/clientes")
+    public SenhaResponse criarCliente(@Valid @RequestBody CriarClienteRequest req) {
+        return adminClienteService.criar(req);
+    }
+
+    /** Ativar/estender plano (modo meses|dias|data). */
+    @PostMapping("/clientes/{id}/plano")
+    public void alterarPlano(@PathVariable UUID id, @Valid @RequestBody PlanoRequest req) {
+        adminClienteService.alterarPlano(id, req);
+    }
+
+    /** Resetar a senha do dono. Body opcional: se vazio, gera e devolve. */
+    @PostMapping("/clientes/{id}/senha")
+    public SenhaResponse resetarSenha(@PathVariable UUID id,
+                                      @RequestBody(required = false) ResetSenhaRequest req) {
+        return adminClienteService.resetarSenha(id, req);
+    }
+
+    /** Suspende o cliente (painel bloqueado + bot mudo). */
+    @PostMapping("/clientes/{id}/suspender")
+    public void suspender(@PathVariable UUID id) {
+        adminClienteService.definirAtivo(id, false);
+    }
+
+    /** Reativa o cliente. */
+    @PostMapping("/clientes/{id}/reativar")
+    public void reativar(@PathVariable UUID id) {
+        adminClienteService.definirAtivo(id, true);
+    }
+
     private ClienteResumoDto toResumo(Tenant t) {
         String emailDono = usuarioRepository.findFirstByTenantId(t.getId())
                 .map(u -> u.getEmail()).orElse(null);
         return new ClienteResumoDto(
                 t.getId(), t.getNome(), t.getTelefoneWhatsapp(), emailDono,
-                t.getPlano(), t.isAssinaturaVencida(),
+                t.getPlano(), t.isAtivo(), t.isAssinaturaVencida(),
                 t.getTrialExpiraEm(), t.getAssinaturaExpiraEm(), t.getCriadoEm());
     }
 

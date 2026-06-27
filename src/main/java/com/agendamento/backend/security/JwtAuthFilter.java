@@ -48,20 +48,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     SecurityContextHolder.getContext().setAuthentication(auth);
 
                     // SUPERADMIN não tem tenant: token sem claim tenant_id. Não seta o
-                    // TenantContext e não passa pelo bloqueio 402 (Fase 1 do painel admin).
+                    // TenantContext e não passa pelos bloqueios do painel (Fase 1 do painel admin).
                     String tenantClaim = claims.get("tenant_id", String.class);
                     if (tenantClaim != null && !tenantClaim.isBlank()) {
                         UUID tenantId = UUID.fromString(tenantClaim);
                         TenantContext.set(tenantId);
 
-                        // Iteração 6: trial/assinatura vencida bloqueia o painel com 402,
-                        // exceto auth e a própria página de assinatura (senão não dá para renovar).
-                        if (bloqueadoPorAssinatura(request, tenantId)) {
+                        // Suspensão (admin tirou o acesso → 403) e assinatura vencida (→ 402)
+                        // bloqueiam o painel do dono. A resposta já é escrita aqui.
+                        if (aplicarBloqueio(request, response, tenantId)) {
                             SecurityContextHolder.clearContext();
-                            response.setStatus(402);
-                            response.setContentType("application/json;charset=UTF-8");
-                            response.getWriter().write(
-                                    "{\"message\":\"Assinatura vencida. Renove na página de assinatura para continuar.\"}");
                             return;
                         }
                     }
@@ -75,15 +71,35 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private boolean bloqueadoPorAssinatura(HttpServletRequest request, UUID tenantId) {
+    /** Bloqueia o painel do dono se a conta está suspensa (403) ou vencida (402). Escreve a resposta. */
+    private boolean aplicarBloqueio(HttpServletRequest request, HttpServletResponse response, UUID tenantId)
+            throws IOException {
         String path = request.getRequestURI();
-        if (path.startsWith("/api/auth/") || path.startsWith("/api/assinatura")
-                || path.startsWith("/api/admin")) return false;
+        // /api/auth e /api/admin nunca são bloqueados por estado do tenant.
+        if (path.startsWith("/api/auth/") || path.startsWith("/api/admin")) return false;
 
         Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
-        if (tenant == null || !tenant.isAssinaturaVencida()) return false;
+        if (tenant == null) return false;
 
-        log.info("[402] Tenant {} com assinatura vencida tentou acessar {}", tenantId, path);
-        return true;
+        // Suspenso pelo admin: bloqueia TUDO (menos auth/admin) com 403 — "não pode usar mais nada".
+        if (!tenant.isAtivo()) {
+            log.info("[403] Tenant {} suspenso tentou acessar {}", tenantId, path);
+            escreverBloqueio(response, 403, "Conta suspensa. Entre em contato com o suporte.");
+            return true;
+        }
+
+        // Assinatura vencida: bloqueia, exceto a própria página de assinatura (senão não dá para renovar).
+        if (!path.startsWith("/api/assinatura") && tenant.isAssinaturaVencida()) {
+            log.info("[402] Tenant {} com assinatura vencida tentou acessar {}", tenantId, path);
+            escreverBloqueio(response, 402, "Assinatura vencida. Renove na página de assinatura para continuar.");
+            return true;
+        }
+        return false;
+    }
+
+    private void escreverBloqueio(HttpServletResponse response, int status, String mensagem) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"message\":\"" + mensagem + "\"}");
     }
 }

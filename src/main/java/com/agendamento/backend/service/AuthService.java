@@ -25,6 +25,9 @@ import java.util.UUID;
 @Slf4j
 public class AuthService {
 
+    /** Duração padrão do trial no cadastro (self-service e onboard do admin). */
+    public static final int TRIAL_DIAS_PADRAO = 14;
+
     private final TenantRepository tenantRepository;
     private final UsuarioRepository usuarioRepository;
     private final EvolutionApiService evolutionApiService;
@@ -33,32 +36,45 @@ public class AuthService {
 
     @Transactional
     public AuthResponse register(RegisterRequest req) {
-        if (usuarioRepository.existsByEmail(req.getEmail())) {
+        Tenant tenant = criarTenantComDono(
+                req.getNomeEstabelecimento(), req.getTelefoneWhatsapp(),
+                req.getEmail(), req.getSenha(), TRIAL_DIAS_PADRAO);
+        Usuario dono = usuarioRepository.findFirstByTenantId(tenant.getId()).orElseThrow();
+        String token = jwtService.generateToken(dono.getId(), tenant.getId(), dono.getRole());
+        return new AuthResponse(token, tenant.getId().toString());
+    }
+
+    /**
+     * Núcleo de criação de cliente — Tenant (TRIAL) + Usuário OWNER + instância Evolution + webhook.
+     * Reusado pelo cadastro self-service e pelo onboard do admin (Fase 2). Não devolve token.
+     */
+    @Transactional
+    public Tenant criarTenantComDono(String nomeEstabelecimento, String telefoneWhatsapp,
+                                     String email, String senhaPlana, int trialDias) {
+        if (usuarioRepository.existsByEmail(email)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "E-mail já cadastrado.");
         }
 
-        // 1. Criar Tenant — começa no TRIAL de 30 dias (Iteração 6)
         Tenant tenant = Tenant.builder()
-                .nome(req.getNomeEstabelecimento())
-                .telefoneWhatsapp(req.getTelefoneWhatsapp())
+                .nome(nomeEstabelecimento)
+                .telefoneWhatsapp(telefoneWhatsapp)
                 .webhookSecret(UUID.randomUUID().toString().replace("-", ""))
                 .ativo(true)
                 .plano(Plano.TRIAL)
-                .trialExpiraEm(LocalDateTime.now().plusDays(30))
+                .trialExpiraEm(LocalDateTime.now().plusDays(trialDias))
                 .build();
         tenantRepository.save(tenant);
 
-        // 2. Criar Usuário OWNER
         Usuario usuario = Usuario.builder()
                 .tenantId(tenant.getId())
-                .email(req.getEmail())
-                .senha(passwordEncoder.encode(req.getSenha()))
+                .email(email)
+                .senha(passwordEncoder.encode(senhaPlana))
                 .role("OWNER")
                 .ativo(true)
                 .build();
         usuarioRepository.save(usuario);
 
-        // 3. Criar instância na Evolution API (instance name = tenant UUID)
+        // Instância na Evolution API (instance name = tenant UUID)
         String instanceName = tenant.getId().toString();
         try {
             evolutionApiService.criarInstancia(instanceName);
@@ -68,9 +84,8 @@ public class AuthService {
             // Não falha o cadastro — owner pode conectar manualmente depois
         }
 
-        String token = jwtService.generateToken(usuario.getId(), tenant.getId(), usuario.getRole());
         log.info("Tenant cadastrado: {} ({})", tenant.getNome(), tenant.getId());
-        return new AuthResponse(token, instanceName);
+        return tenant;
     }
 
     public AuthResponse login(LoginRequest req) {

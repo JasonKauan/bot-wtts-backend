@@ -56,6 +56,12 @@ public class WebhookController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
+        // Cliente suspenso pelo admin: bot fica mudo (não responde nada).
+        if (!tenant.isAtivo()) {
+            log.info("Tenant {} suspenso — bot silenciado, mensagem ignorada.", tenant.getId());
+            return ResponseEntity.ok().build();
+        }
+
         String telefone  = payload.extractPhone();
         String mensagem  = payload.extractText();
         String pushName  = payload.getData() != null ? payload.getData().getPushName() : null;
