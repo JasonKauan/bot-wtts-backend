@@ -79,6 +79,11 @@ public class BotService {
         String norm = normalizar(mensagem);
 
         // 2. Palavras-chave globais
+        // Cancelar AGENDAMENTO: busca o próximo confirmado do número e pede confirmação.
+        if (isCancelarAgendamento(norm)) {
+            iniciarCancelamento(telefone, tenant);
+            return;
+        }
         if (isEncerrar(norm)) {
             botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId())
                     .ifPresent(botSessionRepository::delete);
@@ -123,6 +128,12 @@ public class BotService {
         }
 
         session.setUltimaInteracao(LocalDateTime.now());
+
+        // CANCELAMENTO de agendamento: espera sim/não.
+        if ("CANCELAMENTO".equals(session.getEtapa())) {
+            handleCancelamento(session, norm, telefone, tenant);
+            return;
+        }
 
         // CONFIRMAÇÃO é à parte: espera sim/não.
         if ("CONFIRMACAO".equals(session.getEtapa())) {
@@ -514,6 +525,76 @@ public class BotService {
         }
     }
 
+    // ── Cancelamento de agendamento ────────────────────────────────────────────
+
+    /** Acha o próximo agendamento confirmado do número e pede confirmação de cancelamento. */
+    private void iniciarCancelamento(String telefone, Tenant tenant) {
+        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByDataHora(
+                telefone, "CONFIRMADO", LocalDateTime.now());
+        BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
+
+        if (agOpt.isEmpty()) {
+            if (existente != null) botSessionRepository.delete(existente);
+            enviar(tenant, telefone,
+                    "Não encontrei nenhum agendamento ativo no seu número 🤔\nSe quiser marcar um, é só mandar *oi*! 😊");
+            return;
+        }
+
+        Agendamento ag = agOpt.get();
+        BotSession session = (existente != null) ? existente
+                : BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build();
+        session.setEtapa("CANCELAMENTO");
+        session.setTentativas(0);
+        session.setUltimaInteracao(LocalDateTime.now());
+        botSessionRepository.save(session);
+
+        String prof = ag.getProfissional() != null ? " com *" + ag.getProfissional() + "*" : "";
+        enviar(tenant, telefone,
+                "Encontrei seu agendamento:\n\n✂️ *" + ag.getServico() + "*" + prof
+                + "\n📅 *" + formatarDataHora(ag.getDataHora()) + "*"
+                + "\n\nQuer mesmo cancelar? Responda *sim* pra cancelar ou *não* pra manter. 😊");
+    }
+
+    /** Trata o sim/não do cancelamento (re-busca o agendamento na hora de cancelar). */
+    private void handleCancelamento(BotSession session, String norm, String telefone, Tenant tenant) {
+        // IA interpreta confirmação natural ("pode cancelar", "deixa", "não quero mais")
+        if (!"sim".equals(norm) && !"s".equals(norm) && !"nao".equals(norm) && !"n".equals(norm)) {
+            int ai = aiService.escolherOpcao(norm,
+                    List.of("Sim, cancelar o agendamento", "Nao, manter o agendamento"));
+            if (ai == 1) norm = "sim";
+            else if (ai == 2) norm = "nao";
+        }
+
+        if ("sim".equals(norm) || "s".equals(norm)) {
+            var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByDataHora(
+                    telefone, "CONFIRMADO", LocalDateTime.now());
+            botSessionRepository.delete(session);
+            if (agOpt.isEmpty()) {
+                enviar(tenant, telefone,
+                        "Hmm, não achei mais esse agendamento — pode já ter sido cancelado. Manda *oi* se quiser marcar de novo 😊");
+                return;
+            }
+            Agendamento ag = agOpt.get();
+            ag.setStatus("CANCELADO");
+            agendamentoRepository.save(ag);
+            log.info("[{}] Agendamento {} cancelado pelo cliente {}", tenant.getId(), ag.getId(), telefone);
+            enviar(tenant, telefone,
+                    "Pronto, cancelei seu agendamento de *" + ag.getServico() + "* (" + formatarDataHora(ag.getDataHora())
+                    + "). 😊\n\nSe quiser remarcar, é só mandar *oi*.");
+
+        } else if ("nao".equals(norm) || "n".equals(norm)) {
+            botSessionRepository.delete(session);
+            enviar(tenant, telefone, "Ufa! Mantive seu agendamento. 👍 Te espero lá!");
+        } else {
+            erroComTentativa(session, telefone, tenant,
+                    "Só pra confirmar: responda *sim* pra cancelar ou *não* pra manter o agendamento. 😊");
+        }
+    }
+
+    private String formatarDataHora(LocalDateTime dt) {
+        return dt.format(DateTimeFormatter.ofPattern("dd/MM 'às' HH:mm"));
+    }
+
     // ── Tentativas ────────────────────────────────────────────────────────────
 
     private void erroComTentativa(BotSession session, String telefone, Tenant tenant, String msg) {
@@ -742,7 +823,8 @@ public class BotService {
         return null;
     }
 
-    private boolean isEncerrar(String n) { return "cancelar".equals(n) || "sair".equals(n) || "parar".equals(n); }
+    private boolean isEncerrar(String n) { return "sair".equals(n) || "parar".equals(n); }
+    private boolean isCancelarAgendamento(String n) { return n.contains("cancel") || n.contains("desmarc"); }
     private boolean isReiniciar(String n) {
         return Set.of("oi", "oii", "oie", "ola", "opa", "eai", "e ai", "salve", "bom dia",
                 "boa tarde", "boa noite", "boa", "blz", "beleza", "tudo bem", "tudo bom", "menu", "inicio")
