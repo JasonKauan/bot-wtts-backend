@@ -15,6 +15,7 @@ import com.agendamento.backend.service.AdminAuthService;
 import com.agendamento.backend.service.AdminClienteService;
 import com.agendamento.backend.service.AuditoriaService;
 import com.agendamento.backend.service.EvolutionApiService;
+import com.agendamento.backend.service.LembreteService;
 import com.agendamento.backend.service.RateLimiterService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -40,6 +41,7 @@ public class AdminController {
     private final AdminAuthService adminAuthService;
     private final AdminClienteService adminClienteService;
     private final AuditoriaService auditoriaService;
+    private final LembreteService lembreteService;
     private final TenantRepository tenantRepository;
     private final UsuarioRepository usuarioRepository;
     private final EvolutionApiService evolutionApiService;
@@ -104,6 +106,13 @@ public class AdminController {
     @GetMapping("/auditoria")
     public List<AuditoriaDto> auditoria() {
         return auditoriaService.listar();
+    }
+
+    /** Dispara o job de lembretes na hora (teste): manda os lembretes da janela 23–25h agora. */
+    @PostMapping("/lembretes/disparar")
+    public Map<String, Object> dispararLembretes() {
+        int enviados = lembreteService.enviarLembretes();
+        return Map.of("enviados", enviados);
     }
 
     private ClienteResumoDto toResumo(Tenant t) {

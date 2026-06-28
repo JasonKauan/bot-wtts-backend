@@ -35,13 +35,13 @@ public class LembreteService {
      */
     @Scheduled(fixedRate = 3_600_000)
     @Transactional
-    public void enviarLembretes() {
+    public int enviarLembretes() {
         LocalDateTime agora  = LocalDateTime.now();
         LocalDateTime inicio = agora.plusHours(23);
         LocalDateTime fim    = agora.plusHours(25);
 
         List<Agendamento> pendentes = agendamentoRepository.findParaLembrete(inicio, fim);
-        if (pendentes.isEmpty()) return;
+        if (pendentes.isEmpty()) return 0;
 
         log.info("[Lembrete] {} agendamento(s) para lembrar na janela {}-{}", pendentes.size(), inicio, fim);
 
@@ -49,9 +49,10 @@ public class LembreteService {
         Map<UUID, Tenant> tenants = tenantRepository.findByAtivoTrue()
                 .stream().collect(Collectors.toMap(Tenant::getId, t -> t));
 
+        int enviados = 0;
         for (Agendamento ag : pendentes) {
             Tenant tenant = tenants.get(ag.getTenantId());
-            if (tenant == null) continue;
+            if (tenant == null) continue;   // tenant inativo/suspenso não recebe lembrete
 
             String mensagem = montarMensagem(ag, tenant);
             evolutionApiService.enviarMensagemNaInstancia(
@@ -59,10 +60,12 @@ public class LembreteService {
 
             ag.setLembreteEnviado(true);
             agendamentoRepository.save(ag);
+            enviados++;
 
             log.info("[Lembrete] Enviado → tenant: {} | telefone: {} | dataHora: {}",
                     tenant.getId(), ag.getClienteTelefone(), ag.getDataHora());
         }
+        return enviados;
     }
 
     private String montarMensagem(Agendamento ag, Tenant tenant) {

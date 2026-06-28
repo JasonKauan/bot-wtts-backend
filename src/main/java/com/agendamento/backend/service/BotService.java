@@ -66,7 +66,7 @@ public class BotService {
         if (isReiniciar(norm)) {
             botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId())
                     .ifPresent(botSessionRepository::delete);
-            iniciarSessao(telefone, tenant);
+            iniciarSessao(telefone, tenant, clienteNome);
             return;
         }
         if ("ajuda".equals(norm)) {
@@ -82,7 +82,7 @@ public class BotService {
         if (session == null) {
             // Resposta a lembrete (sem sessão ativa)
             if ("sim".equals(norm) || "s".equals(norm) || "nao".equals(norm) || "n".equals(norm)) {
-                handleRespostaLembrete(telefone, norm, tenant);
+                handleRespostaLembrete(telefone, norm, clienteNome, tenant);
                 return;
             }
             // Primeira mensagem (não é saudação): cria a sessão e já tenta ENTENDER a frase inteira.
@@ -104,7 +104,7 @@ public class BotService {
 
         // CONFIRMAÇÃO é à parte: espera sim/não.
         if ("CONFIRMACAO".equals(session.getEtapa())) {
-            handleConfirmacao(session, norm, telefone, clienteNome, tenant);
+            handleConfirmacao(session, mensagem, norm, telefone, clienteNome, tenant);
             return;
         }
 
@@ -126,7 +126,7 @@ public class BotService {
 
     // ── Início / saudação ─────────────────────────────────────────────────────
 
-    private BotSession iniciarSessao(String telefone, Tenant tenant) {
+    private BotSession iniciarSessao(String telefone, Tenant tenant, String clienteNome) {
         List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
         BotSession session = BotSession.builder()
                 .tenantId(tenant.getId()).telefone(telefone)
@@ -134,17 +134,29 @@ public class BotService {
                 .ultimaInteracao(LocalDateTime.now()).build();
         botSessionRepository.save(session);
 
+        String nome = primeiroNome(clienteNome);
         if (servicos.isEmpty()) {
-            enviar(tenant, telefone, "Oi! 👋 Ainda não temos serviços configurados por aqui. Tente mais tarde! 😊");
+            enviar(tenant, telefone, "Oi" + (nome != null ? ", " + nome : "")
+                    + "! 👋 Ainda não temos serviços configurados por aqui. Tente mais tarde! 😊");
         } else {
             String saudacao = aiService.redigir(
-                    "Cumprimente o cliente que acabou de chamar o estabelecimento \"" + tenant.getNome()
+                    "Cumprimente " + (nome != null ? "o cliente " + nome : "o cliente")
+                    + " que acabou de chamar o estabelecimento \"" + tenant.getNome()
                     + "\" no WhatsApp, diga que vai ajudar a agendar e pergunte qual servico ele quer.");
             if (saudacao == null)
-                saudacao = "Oi! 👋 Aqui é da *" + tenant.getNome() + "*, vou te ajudar a agendar 😊\n\nQual serviço você quer?";
+                saudacao = "Oi" + (nome != null ? ", " + nome : "") + "! 👋 Aqui é da *" + tenant.getNome()
+                        + "*, vou te ajudar a agendar 😊\n\nQual serviço você quer?";
             enviar(tenant, telefone, saudacao + "\n\n" + formatarServicos(servicos));
         }
         return session;
+    }
+
+    /** Primeiro nome (capitalizado) a partir do pushName do WhatsApp; null se vazio/numérico. */
+    private String primeiroNome(String clienteNome) {
+        if (clienteNome == null || clienteNome.isBlank()) return null;
+        String primeiro = clienteNome.trim().split("\\s+")[0];
+        if (primeiro.isBlank() || primeiro.matches(".*\\d.*")) return null;  // evita "5511..." como nome
+        return primeiro.substring(0, 1).toUpperCase() + primeiro.substring(1).toLowerCase();
     }
 
     // ── Slot-filling: preencher ───────────────────────────────────────────────
@@ -327,7 +339,7 @@ public class BotService {
 
     // ── Confirmação ───────────────────────────────────────────────────────────
 
-    private void handleConfirmacao(BotSession session, String norm, String telefone,
+    private void handleConfirmacao(BotSession session, String msg, String norm, String telefone,
                                    String clienteNome, Tenant tenant) {
         // IA: interpreta confirmação natural ("pode ser", "isso", "não quero")
         if (!"sim".equals(norm) && !"s".equals(norm) && !"nao".equals(norm) && !"n".equals(norm)) {
@@ -381,18 +393,79 @@ public class BotService {
             botSessionRepository.delete(session);
             enviar(tenant, telefone, "Tudo bem! Mande *oi* para recomeçar. 😊");
         } else {
-            erroComTentativa(session, telefone, tenant, "Só pra confirmar: responda *sim* 👍 pra agendar, ou *não* pra cancelar.");
+            // Não foi sim/não: pode ser uma correção ("não, queria 16h", "muda pra terça").
+            // Tenta re-extrair e ajustar; se ajustou algo, re-pergunta o que faltar ou re-confirma.
+            if (tentarEditarNaConfirmacao(session, msg, tenant)) {
+                session.setTentativas(0);
+                askSlot(session, proximoSlot(session, tenant), telefone, tenant);
+                return;
+            }
+            erroComTentativa(session, telefone, tenant,
+                    "Só pra confirmar: responda *sim* 👍 pra agendar, ou *não* pra cancelar.\n" +
+                    "_(ou me diga o que mudar, ex.: \"muda pra 16h\" ou \"na verdade quero terça\")_");
         }
     }
 
-    private void handleRespostaLembrete(String telefone, String norm, Tenant tenant) {
+    /**
+     * Cliente mexeu em algo no passo de confirmação. Re-extrai a frase e SOBRESCREVE os campos
+     * citados (serviço/profissional/data/hora). Devolve true se algo mudou.
+     */
+    private boolean tentarEditarNaConfirmacao(BotSession s, String msg, Tenant tenant) {
+        if (!aiService.ativo() || msg.trim().matches("\\d+")) return false;
+
+        List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
+        List<Profissional> profs = profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId());
+        AiService.Extracao ex = aiService.extrair(msg,
+                servicos.stream().map(Servico::getNome).toList(),
+                profs.stream().map(Profissional::getNome).toList(),
+                LocalDate.now());
+        if (ex == null) return false;
+
+        boolean mudou = false;
+
+        if (ex.servico != null) {
+            var match = servicos.stream().filter(sv -> nomeBate(sv.getNome(), ex.servico)).findFirst();
+            if (match.isPresent() && !match.get().getNome().equals(s.getServicoEscolhido())) {
+                s.setServicoEscolhido(match.get().getNome());
+                mudou = true;
+            }
+        }
+        if (ex.profissional != null) {
+            var match = profs.stream().filter(p -> nomeBate(p.getNome(), ex.profissional)).findFirst();
+            if (match.isPresent() && !match.get().getId().equals(s.getProfissionalId())) {
+                s.setProfissionalId(match.get().getId());
+                s.setProfissionalEscolhido(match.get().getNome());
+                mudou = true;
+            }
+        }
+        if (ex.data != null && !ex.data.isBefore(LocalDate.now()) && !ex.data.isAfter(LocalDate.now().plusDays(30))
+                && !ex.data.equals(s.getDataEscolhida())) {
+            s.setDataEscolhida(ex.data);
+            mudou = true;
+            // a hora atual pode não existir mais na nova data → limpa pra reperguntar
+            if (s.getHoraEscolhida() != null && !horariosDisponiveis(tenant, ex.data).contains(s.getHoraEscolhida()))
+                s.setHoraEscolhida(null);
+        }
+        if (ex.hora != null && s.getDataEscolhida() != null && !ex.hora.equals(s.getHoraEscolhida())) {
+            if (horariosDisponiveis(tenant, s.getDataEscolhida()).contains(ex.hora)) {
+                s.setHoraEscolhida(ex.hora);   // hora pedida está livre
+            } else {
+                s.setHoraEscolhida(null);      // pediu hora indisponível → volta pro passo HORA
+            }
+            mudou = true;
+        }
+
+        return mudou;
+    }
+
+    private void handleRespostaLembrete(String telefone, String norm, String clienteNome, Tenant tenant) {
         LocalDateTime agora = LocalDateTime.now();
         var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
                 telefone, "CONFIRMADO", agora, agora.plusHours(26));
 
         if (agOpt.isEmpty()) {
             // Sem agendamento próximo — tratar como início de conversa
-            iniciarSessao(telefone, tenant);
+            iniciarSessao(telefone, tenant, clienteNome);
             return;
         }
 
