@@ -40,6 +40,23 @@ public class Tenant {
     @Builder.Default
     private int horarioFechamento = 18;
 
+    /** Grade horária (Iteração 7) — intervalo entre slots, em minutos. */
+    @Column(name = "intervalo_minutos", nullable = false)
+    @Builder.Default
+    private int intervaloMinutos = 60;
+
+    /** Janela de almoço (horas 0-24) pulada na grade. Nulo = sem almoço. */
+    @Column(name = "almoco_inicio")
+    private Integer almocoInicio;
+
+    @Column(name = "almoco_fim")
+    private Integer almocoFim;
+
+    /** Dias de funcionamento ISO (1=seg ... 7=dom), separados por vírgula. */
+    @Column(name = "dias_funcionamento", nullable = false)
+    @Builder.Default
+    private String diasFuncionamento = "1,2,3,4,5,6,7";
+
     /** Plano de assinatura — Iteração 6. */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

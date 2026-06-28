@@ -8,4 +8,8 @@ public record ConfiguracaoResponse(
         String nome,
         String telefoneWhatsapp,
         int horarioAbertura,
-        int horarioFechamento) {}
+        int horarioFechamento,
+        int intervaloMinutos,
+        Integer almocoInicio,
+        Integer almocoFim,
+        String diasFuncionamento) {}

@@ -13,6 +13,7 @@ import java.text.Normalizer;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,11 +31,6 @@ import java.util.UUID;
 public class BotService {
 
     private static final int MAX_TENTATIVAS = 3;
-
-    // TODO Iteração 7: grade por profissional — virá do banco
-    private static final List<String> HORARIOS = List.of(
-            "09:00", "10:00", "11:00", "14:00", "15:00", "16:00"
-    );
 
     private final BotSessionRepository    botSessionRepository;
     private final AgendamentoRepository   agendamentoRepository;
@@ -202,7 +198,7 @@ public class BotService {
             }
             case "HORA" -> {
                 if (s.getHoraEscolhida() != null || s.getDataEscolhida() == null) return;
-                List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
                 Integer op = parsearOpcao(msg, disp.size());
                 if (op != null) s.setHoraEscolhida(disp.get(op - 1));
             }
@@ -225,7 +221,7 @@ public class BotService {
             s.setDataEscolhida(ex.data);
 
         if (s.getHoraEscolhida() == null && ex.hora != null && s.getDataEscolhida() != null
-                && horariosDisponiveis(tenant.getId(), s.getDataEscolhida()).contains(ex.hora))
+                && horariosDisponiveis(tenant, s.getDataEscolhida()).contains(ex.hora))
             s.setHoraEscolhida(ex.hora);
     }
 
@@ -252,7 +248,7 @@ public class BotService {
             case "DATA" -> enviar(tenant, telefone,
                     resumoParcial(s) + "📅 Pra qual dia? _(hoje, amanhã ou dd/mm)_");
             case "HORA" -> {
-                List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
                 if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
                 enviar(tenant, telefone, "🗓️ *" + formatarData(s.getDataEscolhida()) + "* — horários:\n\n" + formatarLista(disp));
             }
@@ -266,7 +262,7 @@ public class BotService {
         s.setDataEscolhida(null);
         s.setEtapa("DATA");
         botSessionRepository.save(s);
-        LocalDate proxima = proximaDataComVaga(tenant.getId(), cheia.plusDays(1));
+        LocalDate proxima = proximaDataComVaga(tenant, cheia.plusDays(1));
         String sugestao = (proxima != null)
                 ? " A próxima com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
                 : " Me diz outra data, por favor.";
@@ -302,7 +298,7 @@ public class BotService {
     }
 
     private void ajudarHora(BotSession s, String msg, String telefone, Tenant tenant) {
-        List<String> disp = horariosDisponiveis(tenant.getId(), s.getDataEscolhida());
+        List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
         if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
 
         // Tentou um horário específico que não está livre? Sugere o(s) mais próximo(s) da lista real.
@@ -358,7 +354,7 @@ public class BotService {
                 session.setEtapa("HORA");
                 session.setTentativas(0);
                 botSessionRepository.save(session);
-                List<String> disp = horariosDisponiveis(tenant.getId(), session.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, session.getDataEscolhida());
                 enviar(tenant, telefone, disp.isEmpty()
                         ? "Ihh, esse horário acabou de ser reservado 😕 E não sobrou mais nada nesse dia. Qual outra data?"
                         : "Ihh, esse horário acabou de ser reservado 😕 Mas ainda tenho " + juntarHorarios(disp) + " — qual prefere?");
@@ -434,16 +430,45 @@ public class BotService {
         evolutionApiService.enviarMensagemNaInstancia(tenant.getId().toString(), telefone, texto);
     }
 
-    private List<String> horariosDisponiveis(UUID tenantId, LocalDate data) {
+    private List<String> horariosDisponiveis(Tenant tenant, LocalDate data) {
+        if (!diaFunciona(tenant, data)) return List.of();   // estabelecimento fechado nesse dia da semana
         LocalDateTime agora = LocalDateTime.now();
-        return HORARIOS.stream()
+        return gerarGrade(tenant).stream()
                 .filter(h -> {
                     LocalDateTime slot = LocalDateTime.of(data, LocalTime.parse(h));
                     // não oferecer horário que já passou (relevante quando a data é hoje)
                     return slot.isAfter(agora)
-                            && !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenantId, slot, "CONFIRMADO");
+                            && !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenant.getId(), slot, "CONFIRMADO");
                 })
                 .toList();
+    }
+
+    /** Gera a grade do dia: de abertura a fechamento, de intervalo em intervalo, pulando o almoço. */
+    private List<String> gerarGrade(Tenant t) {
+        int intervalo = t.getIntervaloMinutos() > 0 ? t.getIntervaloMinutos() : 60;
+        int inicioMin = t.getHorarioAbertura() * 60;
+        int fimMin    = t.getHorarioFechamento() * 60;
+        Integer almIni = t.getAlmocoInicio() != null ? t.getAlmocoInicio() * 60 : null;
+        Integer almFim = t.getAlmocoFim()    != null ? t.getAlmocoFim()    * 60 : null;
+
+        List<String> slots = new ArrayList<>();
+        for (int m = inicioMin; m < fimMin; m += intervalo) {
+            // pula slots dentro da janela de almoço [inicio, fim)
+            if (almIni != null && almFim != null && m >= almIni && m < almFim) continue;
+            slots.add(String.format("%02d:%02d", m / 60, m % 60));
+        }
+        return slots;
+    }
+
+    /** O estabelecimento funciona nesse dia da semana? (dias ISO 1=seg..7=dom em diasFuncionamento) */
+    private boolean diaFunciona(Tenant t, LocalDate data) {
+        String dias = t.getDiasFuncionamento();
+        if (dias == null || dias.isBlank()) return true; // sem config = todos os dias
+        String alvo = String.valueOf(data.getDayOfWeek().getValue());
+        for (String p : dias.split(",")) {
+            if (p.trim().equals(alvo)) return true;
+        }
+        return false;
     }
 
     /** Prefixo com o que já sabemos: "*Corte* com *Raphael* 👍\n\n". Vazio se nada definido. */
@@ -509,10 +534,10 @@ public class BotService {
     }
 
     /** Primeira data a partir de 'inicio' (até 30 dias) com ao menos um horário livre. */
-    private LocalDate proximaDataComVaga(UUID tenantId, LocalDate inicio) {
+    private LocalDate proximaDataComVaga(Tenant tenant, LocalDate inicio) {
         LocalDate limite = LocalDate.now().plusDays(30);
         for (LocalDate d = inicio; !d.isAfter(limite); d = d.plusDays(1)) {
-            if (!horariosDisponiveis(tenantId, d).isEmpty()) return d;
+            if (!horariosDisponiveis(tenant, d).isEmpty()) return d;
         }
         return null;
     }

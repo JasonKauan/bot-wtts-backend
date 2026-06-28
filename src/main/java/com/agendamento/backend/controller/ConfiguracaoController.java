@@ -25,16 +25,32 @@ public class ConfiguracaoController {
 
     @PutMapping
     public ConfiguracaoResponse atualizar(@Valid @RequestBody ConfiguracaoRequest req) {
+        if (req.horarioFechamento() <= req.horarioAbertura()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Fechamento deve ser depois da abertura.");
+        }
+        boolean temAlmoco = req.almocoInicio() != null && req.almocoFim() != null;
+        if (temAlmoco && req.almocoFim() <= req.almocoInicio()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Fim do almoço deve ser depois do início.");
+        }
+
         Tenant t = buscarTenant();
         t.setNome(req.nome());
         t.setHorarioAbertura(req.horarioAbertura());
         t.setHorarioFechamento(req.horarioFechamento());
+        t.setIntervaloMinutos(req.intervaloMinutos());
+        // Almoço só vale com os dois campos; caso contrário, sem almoço.
+        t.setAlmocoInicio(temAlmoco ? req.almocoInicio() : null);
+        t.setAlmocoFim(temAlmoco ? req.almocoFim() : null);
+        t.setDiasFuncionamento(
+                (req.diasFuncionamento() == null || req.diasFuncionamento().isBlank())
+                        ? "1,2,3,4,5,6,7" : req.diasFuncionamento());
         return toDto(tenantRepository.save(t));
     }
 
     private ConfiguracaoResponse toDto(Tenant t) {
         return new ConfiguracaoResponse(t.getId(), t.getNome(), t.getTelefoneWhatsapp(),
-                t.getHorarioAbertura(), t.getHorarioFechamento());
+                t.getHorarioAbertura(), t.getHorarioFechamento(),
+                t.getIntervaloMinutos(), t.getAlmocoInicio(), t.getAlmocoFim(), t.getDiasFuncionamento());
     }
 
     private Tenant buscarTenant() {
