@@ -67,9 +67,12 @@ public class BotService {
         // 1. Horário de atendimento (usa config do tenant)
         int hora = LocalDateTime.now().getHour();
         if (hora < tenant.getHorarioAbertura() || hora >= tenant.getHorarioFechamento()) {
-            enviar(tenant, telefone,
-                    "Nosso horário de atendimento é das " + tenant.getHorarioAbertura() + "h às "
-                    + tenant.getHorarioFechamento() + "h. Mande *oi* amanhã para agendar! 😊");
+            int ab = tenant.getHorarioAbertura(), fe = tenant.getHorarioFechamento();
+            String ai = aiService.redigir("Estamos fora do horario de atendimento agora. Atendemos das "
+                    + ab + "h as " + fe + "h. Avise o cliente com gentileza e peca pra mandar *oi* dentro desse horario.");
+            enviar(tenant, telefone, ai != null ? ai : escolher(
+                    "Opa! Agora estamos fora do horário 😴 Atendemos das *" + ab + "h às " + fe + "h* — me chama nesse horário que te ajudo! 👋",
+                    "No momento estamos fechados! Funcionamos das *" + ab + "h às " + fe + "h*. Manda *oi* nesse horário pra agendar 😊"));
             return;
         }
 
@@ -79,7 +82,7 @@ public class BotService {
         if (isEncerrar(norm)) {
             botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId())
                     .ifPresent(botSessionRepository::delete);
-            enviar(tenant, telefone, "Tudo bem! Mande *oi* quando quiser agendar. 😊");
+            enviar(tenant, telefone, textoDespedida());
             return;
         }
         if (isReiniciar(norm)) {
@@ -418,7 +421,7 @@ public class BotService {
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
             botSessionRepository.delete(session);
-            enviar(tenant, telefone, "Tudo bem! Mande *oi* para recomeçar. 😊");
+            enviar(tenant, telefone, textoDespedida());
         } else {
             // Não foi sim/não: pode ser uma correção ("não, queria 16h", "muda pra terça").
             // Tenta re-extrair e ajustar; se ajustou algo, re-pergunta o que faltar ou re-confirma.
@@ -611,6 +614,16 @@ public class BotService {
     /** Escolhe uma das variações ao acaso — quebra a repetição dos textos fixos. */
     private String escolher(String... opcoes) {
         return opcoes[RND.nextInt(opcoes.length)];
+    }
+
+    /** Despedida (cancelou/desistiu): IA com tom natural, ou fallback variado. */
+    private String textoDespedida() {
+        String ai = aiService.redigir("O cliente encerrou a conversa sem agendar. "
+                + "Despeca-se de forma simpatica e diga que e so mandar *oi* quando quiser marcar.");
+        return ai != null ? ai : escolher(
+                "Tranquilo! Quando quiser agendar, é só mandar *oi* 😊",
+                "Sem problemas! Tô por aqui — manda *oi* quando quiser marcar 👍",
+                "Beleza! Qualquer hora manda *oi* que a gente agenda 😉");
     }
 
     private String formatarServicos(List<Servico> servicos) {
