@@ -64,10 +64,12 @@ public class AiService {
      */
     public String redigir(String situacao) {
         return call(
-                "Voce e a recepcionista simpatica de um estabelecimento, atendendo no WhatsApp. " +
-                "Escreva UMA frase curta, calorosa e natural (ate ~22 palavras, no maximo 1 emoji). " +
-                "Nao invente informacoes, nao faca listas, use *texto* para negrito. Responda so a frase.",
-                situacao, 80, 0.6);
+                "Voce e a recepcionista de um estabelecimento brasileiro atendendo no WhatsApp. " +
+                "Fale como gente de verdade: calorosa, informal e direta, com jeitinho brasileiro. " +
+                "UMA frase curta (ate ~18 palavras), no maximo 1 emoji. VARIE as palavras a cada vez e " +
+                "EVITE cliches como 'Como posso ajudar', 'Em que posso ser util', 'Fico a disposicao'. " +
+                "Nao invente informacoes, nao faca listas. Use *texto* para negrito. Responda apenas a frase.",
+                situacao, 90, 0.8);
     }
 
     private String call(String system, String user, int maxTokens, double temperature) {
@@ -119,7 +121,9 @@ public class AiService {
     public LocalDate interpretarData(String mensagemCliente, LocalDate hoje) {
         if (!ativo()) return null;
         String resp = chat(
-                "Voce extrai a data que o cliente quer agendar. Hoje e " + hoje + " (formato AAAA-MM-DD). " +
+                "Voce extrai a data que o cliente quer agendar. Hoje e " + hoje + " (" + diaDaSemanaPt(hoje)
+                + ", formato AAAA-MM-DD). Entenda girias: hj=hoje, amnh/amanha=amanha, 'dps de amanha'=hoje+2, " +
+                "seg/ter/qua/qui/sex/sab/dom = dias da semana (proxima ocorrencia). " +
                 "Responda SOMENTE com a data no formato AAAA-MM-DD. Se nao houver data clara, responda NENHUMA.",
                 "Mensagem do cliente: " + mensagemCliente);
         if (resp == null) return null;
@@ -135,7 +139,8 @@ public class AiService {
         if (!ativo()) return null;
         String resp = chat(
                 "Extraia o horario que o cliente quer agendar, no formato HH:MM (24h). " +
-                "Ex: 'as 3 da tarde' -> 15:00; 'umas 9 da manha' -> 09:00. Se nao houver horario claro, responda NENHUM.",
+                "Ex: 'as 3 da tarde' -> 15:00; 'umas 9 da manha' -> 09:00; '2hr'/'2 hrs' -> 14:00 se contexto tarde; " +
+                "'meio dia' -> 12:00; 'meia noite' -> 00:00. Se nao houver horario claro, responda NENHUM.",
                 "Mensagem: " + msg);
         if (resp == null) return null;
         Matcher m = Pattern.compile("([01]?\\d|2[0-3]):([0-5]\\d)").matcher(resp);
@@ -149,10 +154,14 @@ public class AiService {
     /** Slot-filling: lê a mensagem inteira e extrai serviço, profissional, data e hora de uma vez. Null se IA off/falha. */
     public Extracao extrair(String mensagem, List<String> servicos, List<String> profissionais, LocalDate hoje) {
         if (!ativo()) return null;
-        String sys = "Voce extrai dados de um pedido de agendamento por WhatsApp. " +
+        String sys = "Voce extrai dados de um pedido de agendamento por WhatsApp brasileiro. " +
                 "Servicos disponiveis: " + servicos + ". " +
                 "Profissionais: " + (profissionais.isEmpty() ? "nenhum" : profissionais) + ". " +
-                "Hoje e " + hoje + " (formato AAAA-MM-DD). " +
+                "Hoje e " + hoje + " (" + diaDaSemanaPt(hoje) + ", formato AAAA-MM-DD). " +
+                "O cliente usa girias e abreviacoes do zap: hj/hje=hoje, amnh/amanha/amn=amanha, " +
+                "'dps de amanha'/'depois de amanha'=hoje+2, hr/hrs=hora, " +
+                "seg=segunda, ter=terca, qua=quarta, qui=quinta, sex=sexta, sab=sabado, dom=domingo, " +
+                "'meio dia'=12:00, 'meia noite'=00:00, 'umas 3 da tarde'=15:00. Resolva-as para data/hora reais. " +
                 "Responda SOMENTE um JSON valido, sem texto extra: " +
                 "{\"servico\": <nome EXATO da lista ou null>, \"profissional\": <nome EXATO da lista ou null>, " +
                 "\"data\": <\"AAAA-MM-DD\" ou null>, \"hora\": <\"HH:MM\" ou null>}. " +
@@ -181,6 +190,18 @@ public class AiService {
             log.warn("Falha ao interpretar extração da IA: {}", ex.getMessage());
             return null;
         }
+    }
+
+    private String diaDaSemanaPt(LocalDate d) {
+        return switch (d.getDayOfWeek()) {
+            case MONDAY -> "segunda-feira";
+            case TUESDAY -> "terca-feira";
+            case WEDNESDAY -> "quarta-feira";
+            case THURSDAY -> "quinta-feira";
+            case FRIDAY -> "sexta-feira";
+            case SATURDAY -> "sabado";
+            case SUNDAY -> "domingo";
+        };
     }
 
     private String texto(Object o) {

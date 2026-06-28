@@ -14,8 +14,15 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Bot de agendamento com slot-filling: a IA lê a mensagem INTEIRA e preenche
@@ -31,6 +38,18 @@ import java.util.UUID;
 public class BotService {
 
     private static final int MAX_TENTATIVAS = 3;
+
+    private static final Random RND = new Random();
+
+    /** Dias da semana (ISO 1=seg..7=dom), com abreviações comuns do WhatsApp. */
+    private static final Map<String, Integer> DIA_SEMANA = Map.ofEntries(
+            Map.entry("segunda", 1), Map.entry("seg", 1),
+            Map.entry("terca", 2),   Map.entry("ter", 2),
+            Map.entry("quarta", 3),  Map.entry("qua", 3),
+            Map.entry("quinta", 4),  Map.entry("qui", 4),
+            Map.entry("sexta", 5),   Map.entry("sex", 5),
+            Map.entry("sabado", 6),  Map.entry("sab", 6),
+            Map.entry("domingo", 7), Map.entry("dom", 7));
 
     private final BotSessionRepository    botSessionRepository;
     private final AgendamentoRepository   agendamentoRepository;
@@ -143,9 +162,13 @@ public class BotService {
                     "Cumprimente " + (nome != null ? "o cliente " + nome : "o cliente")
                     + " que acabou de chamar o estabelecimento \"" + tenant.getNome()
                     + "\" no WhatsApp, diga que vai ajudar a agendar e pergunte qual servico ele quer.");
-            if (saudacao == null)
-                saudacao = "Oi" + (nome != null ? ", " + nome : "") + "! 👋 Aqui é da *" + tenant.getNome()
-                        + "*, vou te ajudar a agendar 😊\n\nQual serviço você quer?";
+            if (saudacao == null) {
+                String ola = "Oi" + (nome != null ? ", " + nome : "") + "!";
+                saudacao = escolher(
+                        ola + " 👋 Aqui é da *" + tenant.getNome() + "*, bora agendar? 😊\n\nQual serviço você quer?",
+                        ola + " 😊 Seja bem-vindo(a) à *" + tenant.getNome() + "*! Me diz qual serviço você procura:",
+                        ola + " 👋 Que bom te ver por aqui! Na *" + tenant.getNome() + "*, qual serviço você quer marcar?");
+            }
             enviar(tenant, telefone, saudacao + "\n\n" + formatarServicos(servicos));
         }
         return session;
@@ -254,7 +277,8 @@ public class BotService {
         botSessionRepository.save(s);
         switch (slot) {
             case "SERVICO" -> enviar(tenant, telefone,
-                    "Qual serviço você quer? 😊\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+                    escolher("Qual serviço você quer? 😊", "Me diz o que você quer fazer:", "Pra começar, qual serviço? 😊")
+                    + "\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
             case "PROFISSIONAL" -> enviar(tenant, telefone,
                     resumoParcial(s) + "👤 Com qual profissional?\n\n" + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
             case "DATA" -> enviar(tenant, telefone,
@@ -387,7 +411,10 @@ public class BotService {
             log.info("[{}] Agendamento salvo — {}", tenant.getId(), telefone);
             String ok = aiService.redigir("O agendamento de *" + servicoOk
                     + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
-            enviar(tenant, telefone, ok != null ? ok : "✅ Agendado! Até lá 😊");
+            enviar(tenant, telefone, ok != null ? ok : escolher(
+                    "✅ Prontinho, agendado! Te espero 😊",
+                    "✅ Fechou! Tá marcado. Até lá! 😊",
+                    "✅ Agendamento confirmado! A gente se vê 😉"));
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
             botSessionRepository.delete(session);
@@ -581,6 +608,11 @@ public class BotService {
         return x.equals(y) || x.contains(y) || y.contains(x);
     }
 
+    /** Escolhe uma das variações ao acaso — quebra a repetição dos textos fixos. */
+    private String escolher(String... opcoes) {
+        return opcoes[RND.nextInt(opcoes.length)];
+    }
+
     private String formatarServicos(List<Servico> servicos) {
         var sb = new StringBuilder();
         for (int i = 0; i < servicos.size(); i++) sb.append(i+1).append(". ").append(servicos.get(i).getNome()).append("\n");
@@ -650,23 +682,59 @@ public class BotService {
     }
 
     private LocalDate parsearData(String norm) {
-        if ("hoje".equals(norm)) return LocalDate.now();
-        if ("amanha".equals(norm)) return LocalDate.now().plusDays(1);
-        try {
-            if (norm.matches("\\d{1,2}/\\d{1,2}")) {
-                String[] p = norm.split("/");
-                return LocalDate.parse(String.format("%02d/%02d/%d", Integer.parseInt(p[0]), Integer.parseInt(p[1]), LocalDate.now().getYear()), DateTimeFormatter.ofPattern("dd/MM/yyyy"));
-            }
-            if (norm.matches("\\d{1,2}/\\d{1,2}/\\d{4}")) {
-                String[] p = norm.split("/");
-                return LocalDate.parse(String.format("%02d/%02d/%s", Integer.parseInt(p[0]), Integer.parseInt(p[1]), p[2]), DateTimeFormatter.ofPattern("dd/MM/yyyy"));
-            }
-        } catch (DateTimeParseException | NumberFormatException ignored) {}
+        if (norm == null || norm.isBlank()) return null;
+
+        // "depois de amanhã" (checar antes de "amanha", que está contido)
+        if (norm.contains("depois de amanha") || norm.contains("dps de amanha")
+                || (norm.contains("dps") && norm.contains("amanha")))
+            return LocalDate.now().plusDays(2);
+
+        // palavras soltas (token a token, evita falso positivo tipo "ter" em "atender")
+        Set<String> tokens = new HashSet<>(Arrays.asList(norm.split("[^a-z0-9]+")));
+        if (!disjuntos(tokens, "hoje", "hj", "hje", "agora")) return LocalDate.now();
+        if (!disjuntos(tokens, "amanha", "amanhaa", "amnh", "amnha", "amn")) return LocalDate.now().plusDays(1);
+        for (String w : tokens) {
+            Integer dow = DIA_SEMANA.get(w);
+            if (dow != null) return proximoDiaDaSemana(dow);
+        }
+
+        // dd/mm ou dd/mm/aaaa em qualquer lugar do texto (ex.: "dia 30/06")
+        Matcher m = Pattern.compile("(\\d{1,2})/(\\d{1,2})(?:/(\\d{2,4}))?").matcher(norm);
+        if (m.find()) {
+            try {
+                int dd = Integer.parseInt(m.group(1));
+                int mm = Integer.parseInt(m.group(2));
+                int ano = m.group(3) != null ? completarAno(Integer.parseInt(m.group(3))) : LocalDate.now().getYear();
+                return LocalDate.of(ano, mm, dd);
+            } catch (java.time.DateTimeException | NumberFormatException ignored) {}
+        }
         return null;
     }
 
-    private boolean isEncerrar(String n) { return "cancelar".equals(n) || "sair".equals(n); }
-    private boolean isReiniciar(String n) { return "oi".equals(n) || "ola".equals(n) || "bom dia".equals(n) || "boa tarde".equals(n) || "boa noite".equals(n); }
+    /** Algum token coincide com as palavras dadas? (true = nenhum coincide) */
+    private boolean disjuntos(Set<String> tokens, String... palavras) {
+        for (String p : palavras) if (tokens.contains(p)) return false;
+        return true;
+    }
+
+    private int completarAno(int ano) { return ano < 100 ? 2000 + ano : ano; }
+
+    /** Próxima ocorrência futura (1–7 dias) do dia da semana ISO informado. */
+    private LocalDate proximoDiaDaSemana(int isoAlvo) {
+        LocalDate d = LocalDate.now();
+        for (int i = 0; i < 7; i++) {
+            d = d.plusDays(1);
+            if (d.getDayOfWeek().getValue() == isoAlvo) return d;
+        }
+        return null;
+    }
+
+    private boolean isEncerrar(String n) { return "cancelar".equals(n) || "sair".equals(n) || "parar".equals(n); }
+    private boolean isReiniciar(String n) {
+        return Set.of("oi", "oii", "oie", "ola", "opa", "eai", "e ai", "salve", "bom dia",
+                "boa tarde", "boa noite", "boa", "blz", "beleza", "tudo bem", "tudo bom", "menu", "inicio")
+                .contains(n);
+    }
 
     private String normalizar(String texto) {
         return Normalizer.normalize(texto.trim(), Normalizer.Form.NFD)
