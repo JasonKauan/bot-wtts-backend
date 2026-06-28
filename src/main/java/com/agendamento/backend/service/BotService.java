@@ -210,7 +210,7 @@ public class BotService {
             }
             case "HORA" -> {
                 if (s.getHoraEscolhida() != null || s.getDataEscolhida() == null) return;
-                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida(), s.getProfissionalId());
                 Integer op = parsearOpcao(msg, disp.size());
                 if (op != null) s.setHoraEscolhida(disp.get(op - 1));
             }
@@ -233,7 +233,7 @@ public class BotService {
             s.setDataEscolhida(ex.data);
 
         if (s.getHoraEscolhida() == null && ex.hora != null && s.getDataEscolhida() != null
-                && horariosDisponiveis(tenant, s.getDataEscolhida()).contains(ex.hora))
+                && horariosDisponiveis(tenant, s.getDataEscolhida(), s.getProfissionalId()).contains(ex.hora))
             s.setHoraEscolhida(ex.hora);
     }
 
@@ -260,7 +260,7 @@ public class BotService {
             case "DATA" -> enviar(tenant, telefone,
                     resumoParcial(s) + "📅 Pra qual dia? _(hoje, amanhã ou dd/mm)_");
             case "HORA" -> {
-                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida(), s.getProfissionalId());
                 if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
                 enviar(tenant, telefone, "🗓️ *" + formatarData(s.getDataEscolhida()) + "* — horários:\n\n" + formatarLista(disp));
             }
@@ -274,7 +274,7 @@ public class BotService {
         s.setDataEscolhida(null);
         s.setEtapa("DATA");
         botSessionRepository.save(s);
-        LocalDate proxima = proximaDataComVaga(tenant, cheia.plusDays(1));
+        LocalDate proxima = proximaDataComVaga(tenant, cheia.plusDays(1), s.getProfissionalId());
         String sugestao = (proxima != null)
                 ? " A próxima com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
                 : " Me diz outra data, por favor.";
@@ -310,7 +310,7 @@ public class BotService {
     }
 
     private void ajudarHora(BotSession s, String msg, String telefone, Tenant tenant) {
-        List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida());
+        List<String> disp = horariosDisponiveis(tenant, s.getDataEscolhida(), s.getProfissionalId());
         if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
 
         // Tentou um horário específico que não está livre? Sugere o(s) mais próximo(s) da lista real.
@@ -360,13 +360,13 @@ public class BotService {
             }
             LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(session.getHoraEscolhida()));
 
-            // Re-checa conflito: alguém pode ter reservado durante a conversa.
-            if (agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenant.getId(), dataHora, "CONFIRMADO")) {
+            // Re-checa conflito (por profissional): alguém pode ter reservado durante a conversa.
+            if (slotOcupado(tenant.getId(), session.getProfissionalId(), dataHora)) {
                 session.setHoraEscolhida(null);
                 session.setEtapa("HORA");
                 session.setTentativas(0);
                 botSessionRepository.save(session);
-                List<String> disp = horariosDisponiveis(tenant, session.getDataEscolhida());
+                List<String> disp = horariosDisponiveis(tenant, session.getDataEscolhida(), session.getProfissionalId());
                 enviar(tenant, telefone, disp.isEmpty()
                         ? "Ihh, esse horário acabou de ser reservado 😕 E não sobrou mais nada nesse dia. Qual outra data?"
                         : "Ihh, esse horário acabou de ser reservado 😕 Mas ainda tenho " + juntarHorarios(disp) + " — qual prefere?");
@@ -443,11 +443,11 @@ public class BotService {
             s.setDataEscolhida(ex.data);
             mudou = true;
             // a hora atual pode não existir mais na nova data → limpa pra reperguntar
-            if (s.getHoraEscolhida() != null && !horariosDisponiveis(tenant, ex.data).contains(s.getHoraEscolhida()))
+            if (s.getHoraEscolhida() != null && !horariosDisponiveis(tenant, ex.data, s.getProfissionalId()).contains(s.getHoraEscolhida()))
                 s.setHoraEscolhida(null);
         }
         if (ex.hora != null && s.getDataEscolhida() != null && !ex.hora.equals(s.getHoraEscolhida())) {
-            if (horariosDisponiveis(tenant, s.getDataEscolhida()).contains(ex.hora)) {
+            if (horariosDisponiveis(tenant, s.getDataEscolhida(), s.getProfissionalId()).contains(ex.hora)) {
                 s.setHoraEscolhida(ex.hora);   // hora pedida está livre
             } else {
                 s.setHoraEscolhida(null);      // pediu hora indisponível → volta pro passo HORA
@@ -503,17 +503,26 @@ public class BotService {
         evolutionApiService.enviarMensagemNaInstancia(tenant.getId().toString(), telefone, texto);
     }
 
-    private List<String> horariosDisponiveis(Tenant tenant, LocalDate data) {
+    private List<String> horariosDisponiveis(Tenant tenant, LocalDate data, UUID profissionalId) {
         if (!diaFunciona(tenant, data)) return List.of();   // estabelecimento fechado nesse dia da semana
         LocalDateTime agora = LocalDateTime.now();
         return gerarGrade(tenant).stream()
                 .filter(h -> {
                     LocalDateTime slot = LocalDateTime.of(data, LocalTime.parse(h));
                     // não oferecer horário que já passou (relevante quando a data é hoje)
-                    return slot.isAfter(agora)
-                            && !agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenant.getId(), slot, "CONFIRMADO");
+                    return slot.isAfter(agora) && !slotOcupado(tenant.getId(), profissionalId, slot);
                 })
                 .toList();
+    }
+
+    /**
+     * Horário ocupado? Com profissional definido, o conflito é POR profissional (dois profissionais
+     * podem atender no mesmo horário). Sem profissional (tenant sem equipe), conflito por estabelecimento.
+     */
+    private boolean slotOcupado(UUID tenantId, UUID profissionalId, LocalDateTime slot) {
+        return profissionalId != null
+                ? agendamentoRepository.existsByTenantIdAndProfissionalIdAndDataHoraAndStatus(tenantId, profissionalId, slot, "CONFIRMADO")
+                : agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenantId, slot, "CONFIRMADO");
     }
 
     /** Gera a grade do dia: de abertura a fechamento, de intervalo em intervalo, pulando o almoço. */
@@ -607,10 +616,10 @@ public class BotService {
     }
 
     /** Primeira data a partir de 'inicio' (até 30 dias) com ao menos um horário livre. */
-    private LocalDate proximaDataComVaga(Tenant tenant, LocalDate inicio) {
+    private LocalDate proximaDataComVaga(Tenant tenant, LocalDate inicio, UUID profissionalId) {
         LocalDate limite = LocalDate.now().plusDays(30);
         for (LocalDate d = inicio; !d.isAfter(limite); d = d.plusDays(1)) {
-            if (!horariosDisponiveis(tenant, d).isEmpty()) return d;
+            if (!horariosDisponiveis(tenant, d, profissionalId).isEmpty()) return d;
         }
         return null;
     }
