@@ -34,8 +34,8 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     Optional<Agendamento> findTopByClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
             String clienteTelefone, String status, LocalDateTime inicio, LocalDateTime fim);
 
-    /** Próximo agendamento confirmado do cliente a partir de agora — usado no cancelamento pelo bot. */
-    Optional<Agendamento> findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByDataHora(
+    /** Último agendamento confirmado que o cliente criou (ainda futuro) — usado no cancelamento pelo bot. */
+    Optional<Agendamento> findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByCriadoEmDesc(
             String clienteTelefone, String status, LocalDateTime dataHora);
 
     /** Iteração 6: agendamentos criados no mês corrente, para o limite do plano. */
