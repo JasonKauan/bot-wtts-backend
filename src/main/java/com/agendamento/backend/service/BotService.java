@@ -55,6 +55,7 @@ public class BotService {
     private final AgendamentoRepository   agendamentoRepository;
     private final ServicoRepository       servicoRepository;
     private final ProfissionalRepository  profissionalRepository;
+    private final BloqueioRepository      bloqueioRepository;
     private final EvolutionApiService     evolutionApiService;
     private final PlanoService            planoService;
     private final AiService               aiService;
@@ -625,6 +626,9 @@ public class BotService {
 
     private List<String> horariosDisponiveis(Tenant tenant, LocalDate data, UUID profissionalId) {
         if (!diaFunciona(tenant, data)) return List.of();   // estabelecimento fechado nesse dia da semana
+        // Folga/feriado bloqueado pelo dono.
+        if (bloqueioRepository.existsByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
+                tenant.getId(), data, data)) return List.of();
         LocalDateTime agora = LocalDateTime.now();
         return gerarGrade(tenant).stream()
                 .filter(h -> {
