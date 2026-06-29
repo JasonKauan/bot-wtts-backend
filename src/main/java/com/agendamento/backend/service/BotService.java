@@ -538,8 +538,8 @@ public class BotService {
 
     /** Acha o próximo agendamento confirmado do número e pede confirmação de cancelamento. */
     private void iniciarCancelamento(String telefone, Tenant tenant) {
-        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByCriadoEmDesc(
-                telefone, "CONFIRMADO", LocalDateTime.now());
+        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
         BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
 
         if (agOpt.isEmpty()) {
@@ -575,8 +575,8 @@ public class BotService {
         }
 
         if ("sim".equals(norm) || "s".equals(norm)) {
-            var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraAfterOrderByCriadoEmDesc(
-                    telefone, "CONFIRMADO", LocalDateTime.now());
+            var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                    telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
             botSessionRepository.delete(session);
             if (agOpt.isEmpty()) {
                 enviar(tenant, telefone,
