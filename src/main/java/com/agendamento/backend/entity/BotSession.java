@@ -43,6 +43,10 @@ public class BotSession {
     @Column(name = "hora_escolhida")
     private String horaEscolhida;
 
+    /** Quando a conversa é uma REMARCAÇÃO: id do agendamento que será movido. Null = agendamento novo. */
+    @Column(name = "remarcando_id")
+    private UUID remarcandoId;
+
     @Column(nullable = false)
     private int tentativas;
 

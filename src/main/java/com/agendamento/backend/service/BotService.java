@@ -80,6 +80,11 @@ public class BotService {
         String norm = normalizar(mensagem);
 
         // 2. Palavras-chave globais
+        // Remarcar: mantém serviço/profissional e só pergunta o novo dia/horário.
+        if (isRemarcar(norm)) {
+            iniciarRemarcacao(telefone, tenant);
+            return;
+        }
         // Cancelar AGENDAMENTO: busca o próximo confirmado do número e pede confirmação.
         if (isCancelarAgendamento(norm)) {
             iniciarCancelamento(telefone, tenant);
@@ -387,15 +392,18 @@ public class BotService {
             else if (ai == 2) norm = "nao";
         }
         if ("sim".equals(norm) || "s".equals(norm)) {
-            try {
-                planoService.validarNovoAgendamento(tenant); // Iteração 6: limite do plano
-            } catch (LimitePlanoException e) {
-                botSessionRepository.delete(session);
-                log.warn("[{}] Agendamento bloqueado pelo limite do plano: {}", tenant.getId(), e.getMessage());
-                enviar(tenant, telefone,
-                        "😔 No momento não conseguimos registrar novos agendamentos por aqui. " +
-                        "Por favor, entre em contato direto com o estabelecimento.");
-                return;
+            // Limite de plano só vale pra agendamento NOVO (remarcar apenas move um existente).
+            if (session.getRemarcandoId() == null) {
+                try {
+                    planoService.validarNovoAgendamento(tenant); // Iteração 6: limite do plano
+                } catch (LimitePlanoException e) {
+                    botSessionRepository.delete(session);
+                    log.warn("[{}] Agendamento bloqueado pelo limite do plano: {}", tenant.getId(), e.getMessage());
+                    enviar(tenant, telefone,
+                            "😔 No momento não conseguimos registrar novos agendamentos por aqui. " +
+                            "Por favor, entre em contato direto com o estabelecimento.");
+                    return;
+                }
             }
             LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(session.getHoraEscolhida()));
 
@@ -412,8 +420,30 @@ public class BotService {
                 return;
             }
 
-            // Fila de aprovação: PENDENTE espera o dono aceitar; senão confirma na hora.
             boolean fila = tenant.isAprovacaoManual();
+
+            // REMARCAÇÃO: move o agendamento existente em vez de criar um novo.
+            if (session.getRemarcandoId() != null) {
+                var antigoOpt = agendamentoRepository.findById(session.getRemarcandoId());
+                botSessionRepository.delete(session);
+                if (antigoOpt.isEmpty() || !antigoOpt.get().getTenantId().equals(tenant.getId())) {
+                    enviar(tenant, telefone, "Hmm, não achei mais o agendamento original 😕 Manda *oi* pra marcar um novo.");
+                    return;
+                }
+                Agendamento antigo = antigoOpt.get();
+                antigo.setDataHora(dataHora);
+                antigo.setStatus(fila ? "PENDENTE" : "CONFIRMADO");
+                antigo.setLembreteEnviado(false);      // novo horário → lembretes valem de novo
+                antigo.setLembreteDiaEnviado(false);
+                agendamentoRepository.save(antigo);
+                log.info("[{}] Agendamento {} remarcado para {} ({})", tenant.getId(), antigo.getId(), dataHora, antigo.getStatus());
+                enviar(tenant, telefone, fila
+                        ? "📝 Recebi sua remarcação de *" + antigo.getServico() + "* pra *" + formatarDataHora(dataHora) + "*! Vou confirmar e te aviso 👍"
+                        : "🔄 Pronto, remarcado! Seu *" + antigo.getServico() + "* agora é em *" + formatarDataHora(dataHora) + "*. Te esperamos 😊");
+                return;
+            }
+
+            // Fila de aprovação: PENDENTE espera o dono aceitar; senão confirma na hora.
             Agendamento ag = Agendamento.builder()
                     .tenantId(tenant.getId())
                     .clienteNome(clienteNome != null ? clienteNome : telefone)
@@ -563,6 +593,38 @@ public class BotService {
                 "Encontrei seu agendamento:\n\n✂️ *" + ag.getServico() + "*" + prof
                 + "\n📅 *" + formatarDataHora(ag.getDataHora()) + "*"
                 + "\n\nQuer mesmo cancelar? Responda *sim* pra cancelar ou *não* pra manter. 😊");
+    }
+
+    /** Inicia a remarcação: mantém serviço/profissional do último agendamento e pergunta novo dia/horário. */
+    private void iniciarRemarcacao(String telefone, Tenant tenant) {
+        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+        BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
+
+        if (agOpt.isEmpty()) {
+            if (existente != null) botSessionRepository.delete(existente);
+            enviar(tenant, telefone, "Não encontrei um agendamento ativo pra remarcar 🤔\nSe quiser marcar um novo, manda *oi*! 😊");
+            return;
+        }
+
+        Agendamento ag = agOpt.get();
+        BotSession session = (existente != null) ? existente
+                : BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build();
+        // mantém serviço/profissional; zera dia/hora; marca que é remarcação
+        session.setServicoEscolhido(ag.getServico());
+        session.setProfissionalId(ag.getProfissionalId());
+        session.setProfissionalEscolhido(ag.getProfissional());
+        session.setDataEscolhida(null);
+        session.setHoraEscolhida(null);
+        session.setRemarcandoId(ag.getId());
+        session.setTentativas(0);
+        session.setUltimaInteracao(LocalDateTime.now());
+        session.setEtapa(proximoSlot(session, tenant));
+        botSessionRepository.save(session);
+
+        enviar(tenant, telefone, "🔄 Vamos remarcar seu *" + ag.getServico() + "* (estava em *"
+                + formatarDataHora(ag.getDataHora()) + "*).");
+        askSlot(session, proximoSlot(session, tenant), telefone, tenant);
     }
 
     /** Trata o sim/não do cancelamento (re-busca o agendamento na hora de cancelar). */
@@ -840,6 +902,7 @@ public class BotService {
 
     private boolean isEncerrar(String n) { return "sair".equals(n) || "parar".equals(n); }
     private boolean isCancelarAgendamento(String n) { return n.contains("cancel") || n.contains("desmarc"); }
+    private boolean isRemarcar(String n) { return n.contains("remarc") || n.contains("reagend"); }
     private boolean isReiniciar(String n) {
         return Set.of("oi", "oii", "oie", "ola", "opa", "eai", "e ai", "salve", "bom dia",
                 "boa tarde", "boa noite", "boa", "blz", "beleza", "tudo bem", "tudo bom", "menu", "inicio")
