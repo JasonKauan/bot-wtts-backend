@@ -41,6 +41,12 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     List<Agendamento> findParaLembrete(@Param("inicio") LocalDateTime inicio,
                                        @Param("fim") LocalDateTime fim);
 
+    /** Lembrete do dia: confirmados sem o lembrete-do-dia, dentro da janela de poucas horas. */
+    @Query("SELECT a FROM Agendamento a WHERE a.status = 'CONFIRMADO' AND a.lembreteDiaEnviado = false " +
+           "AND a.dataHora >= :inicio AND a.dataHora <= :fim")
+    List<Agendamento> findParaLembreteDoDia(@Param("inicio") LocalDateTime inicio,
+                                            @Param("fim") LocalDateTime fim);
+
     /** Para tratar resposta SIM/NÃO ao lembrete: próximo agendamento confirmado nas próximas 26h. */
     Optional<Agendamento> findTopByClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
             String clienteTelefone, String status, LocalDateTime inicio, LocalDateTime fim);

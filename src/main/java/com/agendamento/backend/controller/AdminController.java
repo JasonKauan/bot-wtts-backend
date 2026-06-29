@@ -111,7 +111,7 @@ public class AdminController {
     /** Dispara o job de lembretes na hora (teste): manda os lembretes da janela 23–25h agora. */
     @PostMapping("/lembretes/disparar")
     public Map<String, Object> dispararLembretes() {
-        int enviados = lembreteService.enviarLembretes();
+        int enviados = lembreteService.enviarLembretes() + lembreteService.enviarLembretesDoDia();
         return Map.of("enviados", enviados);
     }
 

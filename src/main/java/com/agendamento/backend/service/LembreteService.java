@@ -68,6 +68,48 @@ public class LembreteService {
         return enviados;
     }
 
+    /**
+     * Lembrete do dia: roda a cada 1h e avisa quem tem horário daqui a ~2-4h
+     * (além do lembrete de 24h). Flag própria evita duplicar.
+     */
+    @Scheduled(fixedRate = 3_600_000)
+    @Transactional
+    public int enviarLembretesDoDia() {
+        LocalDateTime agora  = LocalDateTime.now();
+        LocalDateTime inicio = agora.plusHours(2);
+        LocalDateTime fim    = agora.plusHours(4);
+
+        List<Agendamento> pendentes = agendamentoRepository.findParaLembreteDoDia(inicio, fim);
+        if (pendentes.isEmpty()) return 0;
+
+        Map<UUID, Tenant> tenants = tenantRepository.findByAtivoTrue()
+                .stream().collect(Collectors.toMap(Tenant::getId, t -> t));
+
+        int enviados = 0;
+        for (Agendamento ag : pendentes) {
+            Tenant tenant = tenants.get(ag.getTenantId());
+            if (tenant == null) continue;
+
+            evolutionApiService.enviarMensagemNaInstancia(
+                    tenant.getId().toString(), ag.getClienteTelefone(), montarMensagemDoDia(ag));
+            ag.setLembreteDiaEnviado(true);
+            agendamentoRepository.save(ag);
+            enviados++;
+
+            log.info("[LembreteDia] Enviado → tenant: {} | telefone: {} | dataHora: {}",
+                    tenant.getId(), ag.getClienteTelefone(), ag.getDataHora());
+        }
+        return enviados;
+    }
+
+    private String montarMensagemDoDia(Agendamento ag) {
+        String profTexto = ag.getProfissional() != null ? " com " + ag.getProfissional() : "";
+        return "⏰ Oi " + ag.getClienteNome() + "! Passando pra lembrar do seu horário de *hoje*:\n"
+                + "✂️ " + ag.getServico() + profTexto
+                + " às " + ag.getDataHora().format(FMT_HORA)
+                + "\n\nTe esperamos! 😊\n_(Se não puder vir, responda *cancelar*.)_";
+    }
+
     private String montarMensagem(Agendamento ag, Tenant tenant) {
         String profTexto = ag.getProfissional() != null
                 ? "\n👤 " + ag.getProfissional() : "";

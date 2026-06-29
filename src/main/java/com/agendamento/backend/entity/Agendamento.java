@@ -44,6 +44,11 @@ public class Agendamento {
     @Builder.Default
     private boolean lembreteEnviado = false;
 
+    /** Lembrete do dia (algumas horas antes) — separado do de 24h. */
+    @Column(name = "lembrete_dia_enviado", nullable = false)
+    @Builder.Default
+    private boolean lembreteDiaEnviado = false;
+
     @Column(name = "criado_em", nullable = false, updatable = false)
     private LocalDateTime criadoEm;
 
