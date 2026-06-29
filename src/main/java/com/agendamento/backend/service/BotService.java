@@ -411,6 +411,8 @@ public class BotService {
                 return;
             }
 
+            // Fila de aprovação: PENDENTE espera o dono aceitar; senão confirma na hora.
+            boolean fila = tenant.isAprovacaoManual();
             Agendamento ag = Agendamento.builder()
                     .tenantId(tenant.getId())
                     .clienteNome(clienteNome != null ? clienteNome : telefone)
@@ -418,17 +420,24 @@ public class BotService {
                     .servico(session.getServicoEscolhido())
                     .profissional(session.getProfissionalEscolhido())
                     .profissionalId(session.getProfissionalId())
-                    .dataHora(dataHora).status("CONFIRMADO").build();
+                    .dataHora(dataHora).status(fila ? "PENDENTE" : "CONFIRMADO").build();
             agendamentoRepository.save(ag);
             String servicoOk = session.getServicoEscolhido();
             botSessionRepository.delete(session);
-            log.info("[{}] Agendamento salvo — {}", tenant.getId(), telefone);
-            String ok = aiService.redigir("O agendamento de *" + servicoOk
-                    + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
-            enviar(tenant, telefone, ok != null ? ok : escolher(
-                    "✅ Prontinho, agendado! Te espero 😊",
-                    "✅ Fechou! Tá marcado. Até lá! 😊",
-                    "✅ Agendamento confirmado! A gente se vê 😉"));
+            log.info("[{}] Agendamento salvo ({}) — {}", tenant.getId(), ag.getStatus(), telefone);
+
+            if (fila) {
+                enviar(tenant, telefone, escolher(
+                        "📝 Recebi seu pedido de *" + servicoOk + "*! Vou confirmar com o estabelecimento e já te aviso por aqui 👍",
+                        "📝 Anotado! Seu pedido de *" + servicoOk + "* foi enviado pra confirmação — te aviso assim que aprovarem 😊"));
+            } else {
+                String ok = aiService.redigir("O agendamento de *" + servicoOk
+                        + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
+                enviar(tenant, telefone, ok != null ? ok : escolher(
+                        "✅ Prontinho, agendado! Te espero 😊",
+                        "✅ Fechou! Tá marcado. Até lá! 😊",
+                        "✅ Agendamento confirmado! A gente se vê 😉"));
+            }
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
             botSessionRepository.delete(session);
@@ -631,9 +640,11 @@ public class BotService {
      * podem atender no mesmo horário). Sem profissional (tenant sem equipe), conflito por estabelecimento.
      */
     private boolean slotOcupado(UUID tenantId, UUID profissionalId, LocalDateTime slot) {
+        // PENDENTE também segura o horário (fila de aprovação) — senão dois pedidos no mesmo slot.
+        var ocupado = List.of("CONFIRMADO", "PENDENTE");
         return profissionalId != null
-                ? agendamentoRepository.existsByTenantIdAndProfissionalIdAndDataHoraAndStatus(tenantId, profissionalId, slot, "CONFIRMADO")
-                : agendamentoRepository.existsByTenantIdAndDataHoraAndStatus(tenantId, slot, "CONFIRMADO");
+                ? agendamentoRepository.existsByTenantIdAndProfissionalIdAndDataHoraAndStatusIn(tenantId, profissionalId, slot, ocupado)
+                : agendamentoRepository.existsByTenantIdAndDataHoraAndStatusIn(tenantId, slot, ocupado);
     }
 
     /** Gera a grade do dia: de abertura a fechamento, de intervalo em intervalo, pulando o almoço. */

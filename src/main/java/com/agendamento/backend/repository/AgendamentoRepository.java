@@ -24,6 +24,17 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     boolean existsByTenantIdAndProfissionalIdAndDataHoraAndStatus(
             UUID tenantId, UUID profissionalId, LocalDateTime dataHora, String status);
 
+    /** Conflito considerando vários status (CONFIRMADO + PENDENTE seguram o horário). */
+    boolean existsByTenantIdAndDataHoraAndStatusIn(
+            UUID tenantId, LocalDateTime dataHora, java.util.Collection<String> status);
+
+    boolean existsByTenantIdAndProfissionalIdAndDataHoraAndStatusIn(
+            UUID tenantId, UUID profissionalId, LocalDateTime dataHora, java.util.Collection<String> status);
+
+    /** Fila de solicitações: pendentes futuros do tenant, mais próximos primeiro. */
+    List<Agendamento> findByTenantIdAndStatusAndDataHoraAfterOrderByDataHora(
+            UUID tenantId, String status, LocalDateTime dataHora);
+
     /** Para o scheduler de lembretes: agendamentos confirmados sem lembrete enviado dentro da janela 23h-25h. */
     @Query("SELECT a FROM Agendamento a WHERE a.status = 'CONFIRMADO' AND a.lembreteEnviado = false " +
            "AND a.dataHora >= :inicio AND a.dataHora <= :fim")

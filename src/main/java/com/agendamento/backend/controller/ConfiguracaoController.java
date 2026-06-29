@@ -44,13 +44,15 @@ public class ConfiguracaoController {
         t.setDiasFuncionamento(
                 (req.diasFuncionamento() == null || req.diasFuncionamento().isBlank())
                         ? "1,2,3,4,5,6,7" : req.diasFuncionamento());
+        t.setAprovacaoManual(req.aprovacaoManual());
         return toDto(tenantRepository.save(t));
     }
 
     private ConfiguracaoResponse toDto(Tenant t) {
         return new ConfiguracaoResponse(t.getId(), t.getNome(), t.getTelefoneWhatsapp(),
                 t.getHorarioAbertura(), t.getHorarioFechamento(),
-                t.getIntervaloMinutos(), t.getAlmocoInicio(), t.getAlmocoFim(), t.getDiasFuncionamento());
+                t.getIntervaloMinutos(), t.getAlmocoInicio(), t.getAlmocoFim(), t.getDiasFuncionamento(),
+                t.isAprovacaoManual());
     }
 
     private Tenant buscarTenant() {

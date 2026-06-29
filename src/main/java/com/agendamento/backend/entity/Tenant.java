@@ -57,6 +57,11 @@ public class Tenant {
     @Builder.Default
     private String diasFuncionamento = "1,2,3,4,5,6,7";
 
+    /** Fila de aprovação: se true, agendamentos do bot entram como PENDENTE e o dono aceita/recusa. */
+    @Column(name = "aprovacao_manual", nullable = false)
+    @Builder.Default
+    private boolean aprovacaoManual = false;
+
     /** Plano de assinatura — Iteração 6. */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

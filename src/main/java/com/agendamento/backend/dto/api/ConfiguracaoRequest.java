@@ -12,5 +12,6 @@ public record ConfiguracaoRequest(
         @Min(5) @Max(240) int intervaloMinutos,
         @Min(0) @Max(24) Integer almocoInicio,   // nulo = sem almoço
         @Min(0) @Max(24) Integer almocoFim,
-        String diasFuncionamento                  // ISO "1,2,3,4,5,6,7"
+        String diasFuncionamento,                 // ISO "1,2,3,4,5,6,7"
+        boolean aprovacaoManual                   // fila de aprovação on/off
 ) {}
