@@ -58,6 +58,13 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     Optional<Agendamento> findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
             UUID tenantId, String clienteTelefone, java.util.Collection<String> status, LocalDateTime dataHora);
 
+    /** "Meus horários" no bot: todos os ativos futuros do cliente neste tenant. */
+    List<Agendamento> findByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByDataHora(
+            UUID tenantId, String clienteTelefone, java.util.Collection<String> status, LocalDateTime dataHora);
+
+    /** "De novo": último agendamento que o cliente já fez neste tenant (qualquer status, incluindo passados). */
+    Optional<Agendamento> findTopByTenantIdAndClienteTelefoneOrderByCriadoEmDesc(UUID tenantId, String clienteTelefone);
+
     /** Iteração 6: agendamentos criados no mês corrente, para o limite do plano. */
     long countByTenantIdAndCriadoEmGreaterThanEqual(UUID tenantId, LocalDateTime inicio);
 }

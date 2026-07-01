@@ -79,7 +79,8 @@ public class BotService {
 
         String norm = normalizar(mensagem);
 
-        // 2. Palavras-chave globais
+        // 2. Palavras-chave globais (ordem importa: intenções específicas antes das genéricas —
+        // "remarcar meu horário" contém "meu horário" e não pode cair na listagem)
         // Remarcar: mantém serviço/profissional e só pergunta o novo dia/horário.
         if (isRemarcar(norm)) {
             iniciarRemarcacao(telefone, tenant);
@@ -88,6 +89,16 @@ public class BotService {
         // Cancelar AGENDAMENTO: busca o próximo confirmado do número e pede confirmação.
         if (isCancelarAgendamento(norm)) {
             iniciarCancelamento(telefone, tenant);
+            return;
+        }
+        // "Meus horários": lista o que o cliente tem marcado neste estabelecimento.
+        if (isMeusHorarios(norm)) {
+            mostrarMeusHorarios(telefone, tenant);
+            return;
+        }
+        // "De novo": repete o último agendamento (serviço/profissional) e só pergunta o dia/hora.
+        if (isDeNovo(norm)) {
+            iniciarDeNovo(telefone, tenant);
             return;
         }
         if (isEncerrar(norm)) {
@@ -440,6 +451,7 @@ public class BotService {
                 enviar(tenant, telefone, fila
                         ? "📝 Recebi sua remarcação de *" + antigo.getServico() + "* pra *" + formatarDataHora(dataHora) + "*! Vou confirmar e te aviso 👍"
                         : "🔄 Pronto, remarcado! Seu *" + antigo.getServico() + "* agora é em *" + formatarDataHora(dataHora) + "*. Te esperamos 😊");
+                if (fila) avisarDonoNovoPedido(tenant, antigo);
                 return;
             }
 
@@ -461,6 +473,7 @@ public class BotService {
                 enviar(tenant, telefone, escolher(
                         "📝 Recebi seu pedido de *" + servicoOk + "*! Vou confirmar com o estabelecimento e já te aviso por aqui 👍",
                         "📝 Anotado! Seu pedido de *" + servicoOk + "* foi enviado pra confirmação — te aviso assim que aprovarem 😊"));
+                avisarDonoNovoPedido(tenant, ag);
             } else {
                 String ok = aiService.redigir("O agendamento de *" + servicoOk
                         + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
@@ -595,6 +608,67 @@ public class BotService {
                 + "\n\nQuer mesmo cancelar? Responda *sim* pra cancelar ou *não* pra manter. 😊");
     }
 
+    /** "Meus horários": lista os agendamentos ativos (pendentes+confirmados) do cliente neste tenant. */
+    private void mostrarMeusHorarios(String telefone, Tenant tenant) {
+        List<Agendamento> ativos = agendamentoRepository
+                .findByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByDataHora(
+                        tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+        if (ativos.isEmpty()) {
+            enviar(tenant, telefone, "Você não tem nenhum horário marcado por aqui 🤔\nQuer agendar? É só mandar *oi*! 😊");
+            return;
+        }
+        StringBuilder sb = new StringBuilder("📅 *Seus horários:*\n\n");
+        for (Agendamento a : ativos) {
+            sb.append("• *").append(a.getServico()).append("*");
+            if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
+            sb.append(" — ").append(formatarDataHora(a.getDataHora()));
+            if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando confirmação)_");
+            sb.append("\n");
+        }
+        sb.append("\nPra mudar, responda *remarcar* ou *cancelar*. 😊");
+        enviar(tenant, telefone, sb.toString());
+    }
+
+    /** "De novo": repete serviço/profissional do último agendamento do cliente e pergunta só o dia/hora. */
+    private void iniciarDeNovo(String telefone, Tenant tenant) {
+        var ultimoOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneOrderByCriadoEmDesc(
+                tenant.getId(), telefone);
+        BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
+
+        // Sem histórico, ou o serviço saiu do catálogo → fluxo normal do zero.
+        List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
+        var servicoAindaExiste = ultimoOpt.isPresent()
+                && servicos.stream().anyMatch(sv -> sv.getNome().equals(ultimoOpt.get().getServico()));
+        if (ultimoOpt.isEmpty() || !servicoAindaExiste) {
+            if (existente != null) botSessionRepository.delete(existente);
+            iniciarSessao(telefone, tenant, null);
+            return;
+        }
+
+        Agendamento ultimo = ultimoOpt.get();
+        // Profissional só é reaproveitado se ainda estiver ativo.
+        Profissional prof = ultimo.getProfissionalId() == null ? null
+                : profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId()).stream()
+                        .filter(p -> p.getId().equals(ultimo.getProfissionalId())).findFirst().orElse(null);
+
+        BotSession session = (existente != null) ? existente
+                : BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build();
+        session.setServicoEscolhido(ultimo.getServico());
+        session.setProfissionalId(prof != null ? prof.getId() : null);
+        session.setProfissionalEscolhido(prof != null ? prof.getNome() : null);
+        session.setDataEscolhida(null);
+        session.setHoraEscolhida(null);
+        session.setRemarcandoId(null);   // é um agendamento NOVO, não remarcação
+        session.setTentativas(0);
+        session.setUltimaInteracao(LocalDateTime.now());
+        session.setEtapa(proximoSlot(session, tenant));
+        botSessionRepository.save(session);
+
+        String comQuem = prof != null ? " com *" + prof.getNome() + "*" : "";
+        enviar(tenant, telefone, "🔁 Fechado, igual da última vez: *" + ultimo.getServico() + "*" + comQuem + "!");
+        askSlot(session, proximoSlot(session, tenant), telefone, tenant);
+    }
+
     /** Inicia a remarcação: mantém serviço/profissional do último agendamento e pergunta novo dia/horário. */
     private void iniciarRemarcacao(String telefone, Tenant tenant) {
         var agOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
@@ -684,6 +758,23 @@ public class BotService {
 
     private void enviar(Tenant tenant, String telefone, String texto) {
         evolutionApiService.enviarMensagemNaInstancia(tenant.getId().toString(), telefone, texto);
+    }
+
+    /** Avisa o DONO no WhatsApp que entrou pedido na fila de aprovação. Best-effort: nunca quebra o fluxo. */
+    private void avisarDonoNovoPedido(Tenant tenant, Agendamento ag) {
+        String donoFone = tenant.getTelefoneWhatsapp();
+        if (donoFone == null || donoFone.isBlank()) return;
+        try {
+            String prof = ag.getProfissional() != null ? "\n👤 " + ag.getProfissional() : "";
+            enviar(tenant, donoFone,
+                    "📥 *Novo pedido de agendamento!*\n\n"
+                    + "🙋 " + ag.getClienteNome()
+                    + "\n✂️ " + ag.getServico() + prof
+                    + "\n📅 " + formatarDataHora(ag.getDataHora())
+                    + "\n\nAbra o painel, aba *Solicitações*, pra aceitar ou recusar.");
+        } catch (Exception e) {
+            log.warn("[{}] Falha ao avisar o dono do novo pedido: {}", tenant.getId(), e.getMessage());
+        }
     }
 
     private List<String> horariosDisponiveis(Tenant tenant, LocalDate data, UUID profissionalId) {
@@ -903,6 +994,14 @@ public class BotService {
     private boolean isEncerrar(String n) { return "sair".equals(n) || "parar".equals(n); }
     private boolean isCancelarAgendamento(String n) { return n.contains("cancel") || n.contains("desmarc"); }
     private boolean isRemarcar(String n) { return n.contains("remarc") || n.contains("reagend"); }
+    private boolean isMeusHorarios(String n) {
+        return n.contains("meus horario") || n.contains("meu horario")
+                || n.contains("minha agenda") || n.contains("meus agendamento") || n.contains("meu agendamento");
+    }
+    private boolean isDeNovo(String n) {
+        return n.contains("de novo") || n.contains("denovo")
+                || n.contains("igual da ultima") || n.contains("mesmo de sempre") || n.contains("o de sempre");
+    }
     private boolean isReiniciar(String n) {
         return Set.of("oi", "oii", "oie", "ola", "opa", "eai", "e ai", "salve", "bom dia",
                 "boa tarde", "boa noite", "boa", "blz", "beleza", "tudo bem", "tudo bom", "menu", "inicio")
