@@ -53,6 +53,11 @@ public class LembreteService {
         for (Agendamento ag : pendentes) {
             Tenant tenant = tenants.get(ag.getTenantId());
             if (tenant == null) continue;   // tenant inativo/suspenso não recebe lembrete
+            if (ag.getClienteTelefone() == null || ag.getClienteTelefone().isBlank()) {
+                ag.setLembreteEnviado(true); // manual sem telefone: nada a enviar
+                agendamentoRepository.save(ag);
+                continue;
+            }
 
             String mensagem = montarMensagem(ag, tenant);
             evolutionApiService.enviarMensagemNaInstancia(
@@ -89,6 +94,11 @@ public class LembreteService {
         for (Agendamento ag : pendentes) {
             Tenant tenant = tenants.get(ag.getTenantId());
             if (tenant == null) continue;
+            if (ag.getClienteTelefone() == null || ag.getClienteTelefone().isBlank()) {
+                ag.setLembreteDiaEnviado(true); // manual sem telefone: nada a enviar
+                agendamentoRepository.save(ag);
+                continue;
+            }
 
             evolutionApiService.enviarMensagemNaInstancia(
                     tenant.getId().toString(), ag.getClienteTelefone(), montarMensagemDoDia(ag));
