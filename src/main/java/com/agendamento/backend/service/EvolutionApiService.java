@@ -130,6 +130,21 @@ public class EvolutionApiService {
         }
     }
 
+    /**
+     * Logout: purga as credenciais da sessão do WhatsApp. É a cura da "sessão zumbi"
+     * (device_removed/401): sem isso o connect fica revivendo uma sessão morta e o
+     * QR gerado nunca conecta. Best-effort — erro aqui não pode travar o fluxo.
+     */
+    public void logout(String instanceName) {
+        try {
+            restTemplate.exchange(apiUrl + "/instance/logout/" + instanceName,
+                    HttpMethod.DELETE, new HttpEntity<>(apiHeaders()), String.class);
+            log.info("Logout da instância {} efetuado (sessão resetada)", instanceName);
+        } catch (RestClientException e) {
+            log.warn("Logout da instância {} falhou (seguindo mesmo assim): {}", instanceName, e.getMessage());
+        }
+    }
+
     public boolean instanciaExiste(String instanceName) {
         try {
             restTemplate.exchange(apiUrl + "/instance/connectionState/" + instanceName,

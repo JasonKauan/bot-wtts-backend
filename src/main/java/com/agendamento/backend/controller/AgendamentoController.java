@@ -120,7 +120,8 @@ public class AgendamentoController {
         // Avisa o cliente só quando saiu da fila (PENDENTE → CONFIRMADO).
         if (eraPendente) {
             notificar(ag, "✅ Boa notícia! Seu agendamento de *" + ag.getServico() + "* em *"
-                    + ag.getDataHora().format(FMT) + "* foi *confirmado*. Te esperamos! 😊");
+                    + ag.getDataHora().format(FMT) + "* foi *confirmado*. Te esperamos! 😊\n\n"
+                    + "🔔 Pode deixar que eu te lembro no dia 😉");
         }
     }
 

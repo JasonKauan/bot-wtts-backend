@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,6 +35,21 @@ public class WhatsappController {
         String instancia = TenantContext.get().toString();
         String estado = evolutionApiService.estadoConexao(instancia);
         return Map.of("estado", estado, "conectado", "open".equalsIgnoreCase(estado));
+    }
+
+    /**
+     * Reset da conexão: faz LOGOUT (purga credenciais velhas — cura a sessão zumbi
+     * pós device_removed em que o QR "gera mas nunca conecta") e gera um QR novo.
+     */
+    @PostMapping("/reconectar")
+    public Map<String, Object> reconectar() {
+        String instancia = TenantContext.get().toString();
+        evolutionApiService.logout(instancia);
+        String qr = evolutionApiService.obterQrCode(instancia);
+        Map<String, Object> out = new HashMap<>();
+        out.put("conectado", false);
+        out.put("qr", qr != null ? qr : "");
+        return out;
     }
 
     @GetMapping("/qr")

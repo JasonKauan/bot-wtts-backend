@@ -526,10 +526,13 @@ public class BotService {
             } else {
                 String ok = aiService.redigir("O agendamento de *" + servicoOk
                         + "* foi confirmado com sucesso. Agradeca rapidamente e diga que espera o cliente.");
-                enviar(tenant, telefone, ok != null ? ok : escolher(
+                if (ok == null) ok = escolher(
                         "✅ Prontinho, agendado! Te espero 😊",
                         "✅ Fechou! Tá marcado. Até lá! 😊",
-                        "✅ Agendamento confirmado! A gente se vê 😉"));
+                        "✅ Agendamento confirmado! A gente se vê 😉");
+                enviar(tenant, telefone, ok + "\n\n" + escolher(
+                        "🔔 Ah, e não se preocupa em esquecer: eu te lembro no dia! 😉",
+                        "🔔 Pode deixar que eu te mando um lembrete antes do horário 😉"));
             }
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
