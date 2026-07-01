@@ -115,8 +115,11 @@ public class BotService {
         }
         if ("ajuda".equals(norm)) {
             enviar(tenant, telefone,
-                    "Para agendar, basta mandar *oi*! " +
-                    "Para cancelar, responda *cancelar* a qualquer momento. 😊");
+                    "É bem simples! 😊 Mande *oi* pra ver o menu.\n\n" +
+                    "Você também pode falar direto comigo:\n" +
+                    "• _\"quero corte amanhã às 15h\"_ pra agendar\n" +
+                    "• *meus horários* pra ver o que tem marcado\n" +
+                    "• *remarcar* ou *cancelar* pra mudar algo");
             return;
         }
 
@@ -145,6 +148,12 @@ public class BotService {
         }
 
         session.setUltimaInteracao(LocalDateTime.now());
+
+        // MENU de boas-vindas: opções 1-4; texto livre cai no slot-filling (atalho).
+        if ("MENU".equals(session.getEtapa())) {
+            if (handleMenu(session, norm, telefone, tenant)) return;
+            session.setEtapa("SERVICO"); // não era opção do menu → trata como pedido de agendamento
+        }
 
         // CANCELAMENTO de agendamento: espera sim/não.
         if ("CANCELAMENTO".equals(session.getEtapa())) {
@@ -189,20 +198,58 @@ public class BotService {
             enviar(tenant, telefone, "Oi" + (nome != null ? ", " + nome : "")
                     + "! 👋 Ainda não temos serviços configurados por aqui. Tente mais tarde! 😊");
         } else {
+            // Menu de boas-vindas: guia quem não sabe o que fazer; texto livre continua
+            // funcionando como atalho (cai no slot-filling e pula o menu).
+            session.setEtapa("MENU");
+            botSessionRepository.save(session);
+
             String saudacao = aiService.redigir(
                     "Cumprimente " + (nome != null ? "o cliente " + nome : "o cliente")
                     + " que acabou de chamar o estabelecimento \"" + tenant.getNome()
-                    + "\" no WhatsApp, diga que vai ajudar a agendar e pergunte qual servico ele quer.");
+                    + "\" no WhatsApp e pergunte, em UMA frase, como pode ajudar.");
             if (saudacao == null) {
                 String ola = "Oi" + (nome != null ? ", " + nome : "") + "!";
                 saudacao = escolher(
-                        ola + " 👋 Aqui é da *" + tenant.getNome() + "*, bora agendar? 😊\n\nQual serviço você quer?",
-                        ola + " 😊 Seja bem-vindo(a) à *" + tenant.getNome() + "*! Me diz qual serviço você procura:",
-                        ola + " 👋 Que bom te ver por aqui! Na *" + tenant.getNome() + "*, qual serviço você quer marcar?");
+                        ola + " 👋 Aqui é da *" + tenant.getNome() + "*. Como posso ajudar? 😊",
+                        ola + " 😊 Seja bem-vindo(a) à *" + tenant.getNome() + "*! O que você precisa?",
+                        ola + " 👋 Que bom te ver por aqui! Em que posso ajudar?");
             }
-            enviar(tenant, telefone, saudacao + "\n\n" + formatarServicos(servicos));
+            enviar(tenant, telefone, saudacao + "\n\n" + MENU_OPCOES);
         }
         return session;
+    }
+
+    private static final String MENU_OPCOES =
+            "1️⃣ *Agendar* um horário\n" +
+            "2️⃣ *Meus horários*\n" +
+            "3️⃣ *Serviços e preços*\n" +
+            "4️⃣ *Remarcar ou cancelar*\n\n" +
+            "Responda o número — ou já me diga direto o que precisa 😊";
+
+    /** Etapa MENU: trata as opções 1-4; devolve false se a mensagem não é opção (→ vira agendamento). */
+    private boolean handleMenu(BotSession s, String norm, String telefone, Tenant tenant) {
+        if ("1".equals(norm) || "agendar".equals(norm) || "marcar".equals(norm)) {
+            s.setTentativas(0);
+            askSlot(s, proximoSlot(s, tenant), telefone, tenant);
+            return true;
+        }
+        if ("2".equals(norm)) {
+            mostrarMeusHorarios(telefone, tenant);   // mantém o menu aberto
+            return true;
+        }
+        if ("3".equals(norm) || norm.contains("preco") || norm.contains("valor") || norm.contains("lista")) {
+            List<Servico> servicos = servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId());
+            s.setEtapa("SERVICO");
+            botSessionRepository.save(s);
+            enviar(tenant, telefone, "💈 *Nossos serviços:*\n\n" + formatarServicos(servicos)
+                    + "\n\nQuer agendar? Me diz o número ou o nome do serviço 😊");
+            return true;
+        }
+        if ("4".equals(norm)) {
+            enviar(tenant, telefone, "Quer *remarcar* ou *cancelar*? É só responder uma das duas palavras 😊");
+            return true;
+        }
+        return false;
     }
 
     /** Primeiro nome (capitalizado) a partir do pushName do WhatsApp; null se vazio/numérico. */
