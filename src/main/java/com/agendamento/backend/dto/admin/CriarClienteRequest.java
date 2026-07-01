@@ -20,6 +20,7 @@ public class CriarClienteRequest {
     private String telefone;
 
     /** Opcional: se vazio/nulo, o sistema gera uma senha provisória e devolve pro vendedor repassar. */
+    @jakarta.validation.constraints.Size(min = 8, message = "A senha deve ter pelo menos 8 caracteres.")
     private String senha;
 
     /** Opcional: duração do trial em dias (nulo = padrão 14). */

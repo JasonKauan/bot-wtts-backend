@@ -36,10 +36,6 @@ public class WebhookController {
         if (payload.isFromMe() || !payload.isMensagemRecebida()) {
             return ResponseEntity.ok().build();
         }
-        // Dedup: a Evolution reenvia o mesmo webhook às vezes → não responder em duplicidade.
-        if (messageDedup.jaProcessada(payload.messageId())) {
-            return ResponseEntity.ok().build();
-        }
 
         // Identificar tenant pelo instance name (= tenant UUID)
         Tenant tenant = resolverTenant(payload.getInstance());
@@ -54,6 +50,12 @@ public class WebhookController {
                 tenant.getWebhookSecret().getBytes(StandardCharsets.UTF_8))) {
             log.warn("Secret inválido para tenant: {}", tenant.getId());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // Dedup SÓ DEPOIS do secret: senão qualquer um enche o mapa (memória) e
+        // pode "queimar" IDs de mensagem sem estar autenticado.
+        if (messageDedup.jaProcessada(payload.messageId())) {
+            return ResponseEntity.ok().build();
         }
 
         // Cliente suspenso pelo admin: bot fica mudo (não responde nada).

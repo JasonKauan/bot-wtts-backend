@@ -80,9 +80,14 @@ public class MercadoPagoService {
 
     /** Consulta o status real do pagamento no MP: approved, pending, rejected, cancelled... */
     public String consultarStatus(String mercadoPagoId) {
-        if (isMock() || mercadoPagoId.startsWith("MOCK-")) {
+        if (isMock()) {
             log.warn("[MOCK] consultarStatus({}) → approved", mercadoPagoId);
             return "approved";
+        }
+        // Em PRODUÇÃO, um id MOCK- (sobra da era de testes) jamais pode aprovar assinatura.
+        if (mercadoPagoId.startsWith("MOCK-")) {
+            log.warn("consultarStatus({}) ignorado: id de teste em ambiente de produção", mercadoPagoId);
+            return "mock_invalido";
         }
         Map<?, ?> resp = restTemplate.exchange(API_URL + "/v1/payments/" + mercadoPagoId,
                 HttpMethod.GET, new HttpEntity<>(headers()), Map.class).getBody();

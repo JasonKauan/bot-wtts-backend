@@ -17,12 +17,17 @@ public class RateLimiterService {
 
     private static final int  MAX_TENTATIVAS = 10;
     private static final long JANELA_MS      = 15 * 60 * 1000L; // 15 min
+    private static final int  MAX_CHAVES     = 10_000;          // gatilho da faxina
 
     private final Map<String, Janela> mapa = new ConcurrentHashMap<>();
 
     /** true se a tentativa é permitida; false se estourou o limite na janela atual. */
     public boolean permitir(String chave) {
         long agora = System.currentTimeMillis();
+        // Faxina: sem isso o mapa cresce pra sempre (uma entrada por IP que já tentou logar).
+        if (mapa.size() > MAX_CHAVES) {
+            mapa.entrySet().removeIf(e -> agora >= e.getValue().resetEm());
+        }
         Janela atual = mapa.compute(chave, (k, j) ->
                 (j == null || agora >= j.resetEm())
                         ? new Janela(1, agora + JANELA_MS)

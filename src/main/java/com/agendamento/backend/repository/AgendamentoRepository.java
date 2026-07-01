@@ -47,13 +47,16 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     List<Agendamento> findParaLembreteDoDia(@Param("inicio") LocalDateTime inicio,
                                             @Param("fim") LocalDateTime fim);
 
-    /** Para tratar resposta SIM/NÃO ao lembrete: próximo agendamento confirmado nas próximas 26h. */
-    Optional<Agendamento> findTopByClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
-            String clienteTelefone, String status, LocalDateTime inicio, LocalDateTime fim);
+    /**
+     * Para tratar resposta SIM/NÃO ao lembrete: próximo agendamento confirmado nas próximas 26h.
+     * SEMPRE escopado por tenant — sem isso, cliente de duas barbearias mexeria no agendamento da outra.
+     */
+    Optional<Agendamento> findTopByTenantIdAndClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
+            UUID tenantId, String clienteTelefone, String status, LocalDateTime inicio, LocalDateTime fim);
 
-    /** Último agendamento ATIVO (PENDENTE ou CONFIRMADO) que o cliente criou, ainda futuro — cancelamento pelo bot. */
-    Optional<Agendamento> findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
-            String clienteTelefone, java.util.Collection<String> status, LocalDateTime dataHora);
+    /** Último agendamento ATIVO (PENDENTE ou CONFIRMADO) do cliente NESTE tenant — cancelamento/remarcação pelo bot. */
+    Optional<Agendamento> findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+            UUID tenantId, String clienteTelefone, java.util.Collection<String> status, LocalDateTime dataHora);
 
     /** Iteração 6: agendamentos criados no mês corrente, para o limite do plano. */
     long countByTenantIdAndCriadoEmGreaterThanEqual(UUID tenantId, LocalDateTime inicio);

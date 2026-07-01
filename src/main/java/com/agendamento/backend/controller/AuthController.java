@@ -48,8 +48,12 @@ public class AuthController {
     }
 
     private String clientIp(HttpServletRequest http) {
+        // Última posição do X-Forwarded-For = adicionada pelo proxy confiável (Render).
+        // A primeira é controlada pelo cliente e permitiria burlar o rate limit.
         String xff = http.getHeader("X-Forwarded-For");
-        return (xff != null && !xff.isBlank()) ? xff.split(",")[0].trim() : http.getRemoteAddr();
+        if (xff == null || xff.isBlank()) return http.getRemoteAddr();
+        String[] partes = xff.split(",");
+        return partes[partes.length - 1].trim();
     }
 
     @PostMapping("/refresh")

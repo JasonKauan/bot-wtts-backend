@@ -541,8 +541,8 @@ public class BotService {
 
     private void handleRespostaLembrete(String telefone, String norm, String clienteNome, Tenant tenant) {
         LocalDateTime agora = LocalDateTime.now();
-        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
-                telefone, "CONFIRMADO", agora, agora.plusHours(26));
+        var agOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneAndStatusAndDataHoraBetweenOrderByDataHora(
+                tenant.getId(), telefone, "CONFIRMADO", agora, agora.plusHours(26));
 
         if (agOpt.isEmpty()) {
             // Sem agendamento próximo — tratar como início de conversa
@@ -569,8 +569,8 @@ public class BotService {
 
     /** Acha o próximo agendamento confirmado do número e pede confirmação de cancelamento. */
     private void iniciarCancelamento(String telefone, Tenant tenant) {
-        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
-                telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+        var agOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
         BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
 
         if (agOpt.isEmpty()) {
@@ -597,8 +597,8 @@ public class BotService {
 
     /** Inicia a remarcação: mantém serviço/profissional do último agendamento e pergunta novo dia/horário. */
     private void iniciarRemarcacao(String telefone, Tenant tenant) {
-        var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
-                telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+        var agOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
         BotSession existente = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
 
         if (agOpt.isEmpty()) {
@@ -638,8 +638,8 @@ public class BotService {
         }
 
         if ("sim".equals(norm) || "s".equals(norm)) {
-            var agOpt = agendamentoRepository.findTopByClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
-                    telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+            var agOpt = agendamentoRepository.findTopByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByCriadoEmDesc(
+                    tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
             botSessionRepository.delete(session);
             if (agOpt.isEmpty()) {
                 enviar(tenant, telefone,

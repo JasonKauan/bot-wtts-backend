@@ -50,6 +50,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     // SUPERADMIN não tem tenant: token sem claim tenant_id. Não seta o
                     // TenantContext e não passa pelos bloqueios do painel (Fase 1 do painel admin).
                     String tenantClaim = claims.get("tenant_id", String.class);
+
+                    // Token SEM tenant só pode usar /api/admin/** — nos endpoints do painel
+                    // do dono o TenantContext ficaria nulo e viraria erro 500 (NPE em query).
+                    String path = request.getRequestURI();
+                    if ((tenantClaim == null || tenantClaim.isBlank()) && !path.startsWith("/api/admin")) {
+                        SecurityContextHolder.clearContext();
+                        response.setStatus(403);
+                        response.setContentType("application/json;charset=UTF-8");
+                        response.getWriter().write("{\"message\":\"Este acesso é exclusivo do painel administrativo.\"}");
+                        return;
+                    }
+
                     if (tenantClaim != null && !tenantClaim.isBlank()) {
                         UUID tenantId = UUID.fromString(tenantClaim);
                         TenantContext.set(tenantId);

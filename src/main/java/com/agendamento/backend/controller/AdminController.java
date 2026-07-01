@@ -86,7 +86,7 @@ public class AdminController {
     /** Resetar a senha do dono. Body opcional: se vazio, gera e devolve. */
     @PostMapping("/clientes/{id}/senha")
     public SenhaResponse resetarSenha(@PathVariable UUID id,
-                                      @RequestBody(required = false) ResetSenhaRequest req) {
+                                      @Valid @RequestBody(required = false) ResetSenhaRequest req) {
         return adminClienteService.resetarSenha(id, req);
     }
 
@@ -125,7 +125,10 @@ public class AdminController {
     }
 
     private String clientIp(HttpServletRequest http) {
+        // Última posição do X-Forwarded-For = adicionada pelo proxy confiável (Render).
         String xff = http.getHeader("X-Forwarded-For");
-        return (xff != null && !xff.isBlank()) ? xff.split(",")[0].trim() : http.getRemoteAddr();
+        if (xff == null || xff.isBlank()) return http.getRemoteAddr();
+        String[] partes = xff.split(",");
+        return partes[partes.length - 1].trim();
     }
 }
