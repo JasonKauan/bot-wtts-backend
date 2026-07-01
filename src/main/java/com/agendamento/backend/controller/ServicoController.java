@@ -32,6 +32,7 @@ public class ServicoController {
                 .tenantId(TenantContext.get())
                 .nome(req.nome())
                 .duracaoMinutos(req.duracaoMinutos())
+                .preco(req.preco())
                 .ativo(true)
                 .build();
         return repo.save(s);
@@ -42,6 +43,7 @@ public class ServicoController {
         Servico s = buscarDoTenant(id);
         s.setNome(req.nome());
         s.setDuracaoMinutos(req.duracaoMinutos());
+        s.setPreco(req.preco());
         return repo.save(s);
     }
 

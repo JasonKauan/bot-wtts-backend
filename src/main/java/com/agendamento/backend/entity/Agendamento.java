@@ -36,6 +36,10 @@ public class Agendamento {
     @Column(name = "data_hora", nullable = false)
     private LocalDateTime dataHora;
 
+    /** Duração em minutos (snapshot do serviço na criação). Nulo = usa o intervalo da grade do tenant. */
+    @Column(name = "duracao_minutos")
+    private Integer duracaoMinutos;
+
     /** "CONFIRMADO" | "CANCELADO" | "NAO_COMPARECEU" */
     @Column(nullable = false)
     private String status;

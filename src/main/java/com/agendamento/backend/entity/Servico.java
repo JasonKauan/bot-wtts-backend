@@ -34,6 +34,10 @@ public class Servico {
     @Builder.Default
     private int duracaoMinutos = 30;
 
+    /** Preço exibido pro cliente (opcional — nulo não mostra). */
+    @Column(precision = 10, scale = 2)
+    private java.math.BigDecimal preco;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean ativo = true;
