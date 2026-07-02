@@ -62,6 +62,11 @@ public class Tenant {
     @Builder.Default
     private boolean aprovacaoManual = false;
 
+    /** Antecedência mínima (horas) pra cancelar/remarcar pelo bot. 0 = sem regra. */
+    @Column(name = "antecedencia_min_horas", nullable = false)
+    @Builder.Default
+    private int antecedenciaMinHoras = 0;
+
     /** Plano de assinatura — Iteração 6. */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

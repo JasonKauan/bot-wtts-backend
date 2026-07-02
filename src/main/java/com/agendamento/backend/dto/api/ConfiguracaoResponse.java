@@ -13,4 +13,5 @@ public record ConfiguracaoResponse(
         Integer almocoInicio,
         Integer almocoFim,
         String diasFuncionamento,
-        boolean aprovacaoManual) {}
+        boolean aprovacaoManual,
+        int antecedenciaMinHoras) {}

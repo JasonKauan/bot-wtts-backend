@@ -65,6 +65,24 @@ public class BotService {
     public void processMessage(String telefone, String mensagem, String clienteNome, Tenant tenant) {
         log.info("[{}] Mensagem de {}: {}", tenant.getId(), telefone, mensagem);
 
+        // 0. Modo ATENDENTE HUMANO: o bot fica fora da conversa por 1h (renova a cada mensagem).
+        // Vem antes de tudo — inclusive do "fora do horário" — pra não atrapalhar a conversa humana.
+        BotSession humano = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId()).orElse(null);
+        if (humano != null && "HUMANO".equals(humano.getEtapa())) {
+            String n0 = normalizar(mensagem);
+            if ("menu".equals(n0)) {
+                botSessionRepository.delete(humano);   // cliente pediu o bot de volta
+                iniciarSessao(telefone, tenant, clienteNome);
+                return;
+            }
+            if (humano.getUltimaInteracao().isAfter(LocalDateTime.now().minusMinutes(60))) {
+                humano.setUltimaInteracao(LocalDateTime.now());
+                botSessionRepository.save(humano);
+                return;   // silêncio: humano no comando
+            }
+            botSessionRepository.delete(humano);       // expirou — volta ao fluxo normal, sem alarde
+        }
+
         // 1. Horário de atendimento (usa config do tenant)
         int hora = LocalDateTime.now().getHour();
         if (hora < tenant.getHorarioAbertura() || hora >= tenant.getHorarioFechamento()) {
@@ -81,6 +99,11 @@ public class BotService {
 
         // 2. Palavras-chave globais (ordem importa: intenções específicas antes das genéricas —
         // "remarcar meu horário" contém "meu horário" e não pode cair na listagem)
+        // Atendente humano: bot sai da frente e avisa o dono.
+        if (isAtendente(norm)) {
+            iniciarAtendimentoHumano(telefone, clienteNome, tenant);
+            return;
+        }
         // Remarcar: mantém serviço/profissional e só pergunta o novo dia/horário.
         if (isRemarcar(norm)) {
             iniciarRemarcacao(telefone, tenant);
@@ -500,6 +523,8 @@ public class BotService {
                         ? "📝 Recebi sua remarcação de *" + antigo.getServico() + "* pra *" + formatarDataHora(dataHora) + "*! Vou confirmar e te aviso 👍"
                         : "🔄 Pronto, remarcado! Seu *" + antigo.getServico() + "* agora é em *" + formatarDataHora(dataHora) + "*. Te esperamos 😊");
                 if (fila) avisarDonoNovoPedido(tenant, antigo);
+                else avisarDono(tenant, "🔄 *" + antigo.getClienteNome() + "* remarcou *" + antigo.getServico()
+                        + "* pra *" + formatarDataHora(dataHora) + "*.");
                 return;
             }
 
@@ -627,6 +652,8 @@ public class BotService {
             log.info("[{}] Agendamento {} cancelado via lembrete", tenant.getId(), ag.getId());
             enviar(tenant, telefone,
                     "Tudo bem! Agendamento cancelado. 😊\n\nQuer reagendar? Mande *oi* para recomeçar.");
+            avisarDono(tenant, "❌ *" + ag.getClienteNome() + "* cancelou (respondendo o lembrete): *"
+                    + ag.getServico() + "* — " + formatarDataHora(ag.getDataHora()) + ".");
         }
     }
 
@@ -646,6 +673,10 @@ public class BotService {
         }
 
         Agendamento ag = agOpt.get();
+        if (!podeMexer(tenant, ag)) {
+            enviar(tenant, telefone, msgAntecedencia(tenant, ag, "cancelamentos são aceitos"));
+            return;
+        }
         BotSession session = (existente != null) ? existente
                 : BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build();
         session.setEtapa("CANCELAMENTO");
@@ -658,6 +689,32 @@ public class BotService {
                 "Encontrei seu agendamento:\n\n✂️ *" + ag.getServico() + "*" + prof
                 + "\n📅 *" + formatarDataHora(ag.getDataHora()) + "*"
                 + "\n\nQuer mesmo cancelar? Responda *sim* pra cancelar ou *não* pra manter. 😊");
+    }
+
+    /** Modo atendente: bot silencia 1h pra esse número e avisa o dono no WhatsApp. */
+    private void iniciarAtendimentoHumano(String telefone, String clienteNome, Tenant tenant) {
+        BotSession session = botSessionRepository.findByTelefoneAndTenantId(telefone, tenant.getId())
+                .orElse(BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build());
+        session.setEtapa("HUMANO");
+        session.setTentativas(0);
+        session.setUltimaInteracao(LocalDateTime.now());
+        botSessionRepository.save(session);
+
+        enviar(tenant, telefone,
+                "🙋 Combinado! Já avisei o pessoal aqui — assim que possível alguém te responde por esta mesma conversa.\n\n"
+                + "_(Pra voltar a falar comigo, é só mandar *menu*.)_");
+
+        String donoFone = tenant.getTelefoneWhatsapp();
+        if (donoFone != null && !donoFone.isBlank()) {
+            try {
+                String nome = clienteNome != null && !clienteNome.isBlank() ? clienteNome : telefone;
+                enviar(tenant, donoFone,
+                        "🙋 *" + nome + "* (" + telefone + ") quer falar com uma pessoa!\n\n"
+                        + "Responda ele direto por aqui — o bot vai ficar fora dessa conversa por *1 hora*.");
+            } catch (Exception e) {
+                log.warn("[{}] Falha ao avisar o dono do pedido de atendente: {}", tenant.getId(), e.getMessage());
+            }
+        }
     }
 
     /** "Meus horários": lista os agendamentos ativos (pendentes+confirmados) do cliente neste tenant. */
@@ -734,6 +791,10 @@ public class BotService {
         }
 
         Agendamento ag = agOpt.get();
+        if (!podeMexer(tenant, ag)) {
+            enviar(tenant, telefone, msgAntecedencia(tenant, ag, "remarcações são aceitas"));
+            return;
+        }
         BotSession session = (existente != null) ? existente
                 : BotSession.builder().tenantId(tenant.getId()).telefone(telefone).build();
         // mantém serviço/profissional; zera dia/hora; marca que é remarcação
@@ -779,6 +840,8 @@ public class BotService {
             enviar(tenant, telefone,
                     "Pronto, cancelei seu agendamento de *" + ag.getServico() + "* (" + formatarDataHora(ag.getDataHora())
                     + "). 😊\n\nSe quiser remarcar, é só mandar *oi*.");
+            avisarDono(tenant, "❌ *" + ag.getClienteNome() + "* cancelou: *" + ag.getServico()
+                    + "* — " + formatarDataHora(ag.getDataHora()) + ".\nO horário ficou livre.");
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
             botSessionRepository.delete(session);
@@ -799,7 +862,8 @@ public class BotService {
         session.setTentativas(session.getTentativas() + 1);
         if (session.getTentativas() >= MAX_TENTATIVAS) {
             botSessionRepository.delete(session);
-            enviar(tenant, telefone, "Foi mal, acho que me embananei aqui 😅 Manda *oi* que a gente recomeça!");
+            enviar(tenant, telefone, "Foi mal, acho que me embananei aqui 😅 Manda *oi* que a gente recomeça — "
+                    + "ou responda *atendente* pra falar com uma pessoa 🙋");
         } else {
             botSessionRepository.save(session);
             enviar(tenant, telefone, msg);
@@ -810,6 +874,29 @@ public class BotService {
 
     private void enviar(Tenant tenant, String telefone, String texto) {
         evolutionApiService.enviarMensagemNaInstancia(tenant.getId().toString(), telefone, texto);
+    }
+
+    /** Aviso genérico ao dono no WhatsApp. Best-effort: nunca quebra o fluxo. */
+    private void avisarDono(Tenant tenant, String texto) {
+        String donoFone = tenant.getTelefoneWhatsapp();
+        if (donoFone == null || donoFone.isBlank()) return;
+        try {
+            enviar(tenant, donoFone, texto);
+        } catch (Exception e) {
+            log.warn("[{}] Falha ao avisar o dono: {}", tenant.getId(), e.getMessage());
+        }
+    }
+
+    /** Regra de antecedência: o cliente ainda pode cancelar/remarcar esse agendamento? */
+    private boolean podeMexer(Tenant t, Agendamento ag) {
+        int h = t.getAntecedenciaMinHoras();
+        return h <= 0 || ag.getDataHora().isAfter(LocalDateTime.now().plusHours(h));
+    }
+
+    private String msgAntecedencia(Tenant t, Agendamento ag, String acao) {
+        return "😕 Seu horário é *" + formatarDataHora(ag.getDataHora()) + "* e " + acao
+                + " por aqui só até *" + t.getAntecedenciaMinHoras() + "h antes*.\n\n"
+                + "Se for urgente, responda *atendente* que o pessoal resolve com você 😊";
     }
 
     /** Avisa o DONO no WhatsApp que entrou pedido na fila de aprovação. Best-effort: nunca quebra o fluxo. */
@@ -1011,6 +1098,9 @@ public class BotService {
     private boolean isDeNovo(String n) {
         return n.contains("de novo") || n.contains("denovo")
                 || n.contains("igual da ultima") || n.contains("mesmo de sempre") || n.contains("o de sempre");
+    }
+    private boolean isAtendente(String n) {
+        return n.contains("atendente") || n.contains("humano") || n.contains("falar com");
     }
     private boolean isReiniciar(String n) {
         return Set.of("oi", "oii", "oie", "ola", "opa", "eai", "e ai", "salve", "bom dia",
