@@ -163,10 +163,18 @@ public class BotService {
             botSessionRepository.save(session);
         }
 
-        // 4. Timeout 30 min
+        // 4. Timeout 30 min: reinicia com gentileza (nada de "sessão expirou" seco) e já
+        // entrega o menu — a pessoa não precisa mandar *oi* de novo.
         if (session.getUltimaInteracao().isBefore(LocalDateTime.now().minusMinutes(30))) {
             botSessionRepository.delete(session);
-            enviar(tenant, telefone, "Sua sessão expirou. Mande *oi* para recomeçar! 😊");
+            BotSession nova = BotSession.builder()
+                    .tenantId(tenant.getId()).telefone(telefone)
+                    .etapa("MENU").tentativas(0)
+                    .ultimaInteracao(LocalDateTime.now()).build();
+            botSessionRepository.save(nova);
+            enviar(tenant, telefone,
+                    "Ficamos um tempinho sem conversar, então voltei pro começo pra gente não se perder 😊\n\n"
+                    + MENU_OPCOES);
             return;
         }
 
@@ -269,8 +277,27 @@ public class BotService {
             return true;
         }
         if ("4".equals(norm)) {
-            enviar(tenant, telefone, "Quer *remarcar* ou *cancelar*? É só responder uma das duas palavras 😊");
-            return true;
+            // Busca de verdade antes de responder: sem nada marcado, orienta no contexto do menu.
+            List<Agendamento> ativos = agendamentoRepository
+                    .findByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByDataHora(
+                            tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
+            if (ativos.isEmpty()) {
+                enviar(tenant, telefone,
+                        "Dei uma olhada aqui e você ainda não tem nenhum horário marcado com a gente 🤔\n\n"
+                        + "Quer agendar o primeiro? Responda *1* — ou já me diga o serviço e o dia que prefere 😊");
+                return true;   // mantém o menu aberto
+            }
+            StringBuilder sb = new StringBuilder("Achei! Você tem marcado: 👇\n\n");
+            for (Agendamento a : ativos) {
+                sb.append("• *").append(a.getServico()).append("*");
+                if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
+                sb.append(" — ").append(formatarDataHora(a.getDataHora()));
+                if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando confirmação)_");
+                sb.append("\n");
+            }
+            sb.append("\nQuer *remarcar* ou *cancelar*? É só responder uma das duas 😊");
+            enviar(tenant, telefone, sb.toString());
+            return true;   // mantém o menu aberto (remarcar/cancelar são atalhos globais)
         }
         return false;
     }
@@ -723,7 +750,8 @@ public class BotService {
                 .findByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByDataHora(
                         tenant.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now());
         if (ativos.isEmpty()) {
-            enviar(tenant, telefone, "Você não tem nenhum horário marcado por aqui 🤔\nQuer agendar? É só mandar *oi*! 😊");
+            enviar(tenant, telefone, "Dei uma olhada aqui e você ainda não tem nenhum horário marcado com a gente 🤔\n\n"
+                    + "Quer agendar? Me diga o serviço que você quer — ou o serviço, dia e hora de uma vez 😊");
             return;
         }
         StringBuilder sb = new StringBuilder("📅 *Seus horários:*\n\n");
