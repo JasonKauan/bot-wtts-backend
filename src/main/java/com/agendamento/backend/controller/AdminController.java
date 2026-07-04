@@ -88,7 +88,7 @@ public class AdminController {
         return out;
     }
 
-    /** Vendas e comissões do vendedor logado no mês corrente. */
+    /** Vendas e comissões do vendedor logado: mês corrente + o que ainda tem a receber. */
     @GetMapping("/minhas-vendas")
     public MinhasVendasDto minhasVendas(Authentication auth) {
         var inicioMes = LocalDate.now().withDayOfMonth(1).atStartOfDay();
@@ -96,11 +96,14 @@ public class AdminController {
                 .findByVendedorIdAndCriadoEmGreaterThanEqualOrderByCriadoEmDesc(adminId(auth), inicioMes);
         BigDecimal comissao = vendas.stream().map(Venda::getComissaoValor)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pendente = vendaRepository.findByVendedorIdAndPagoFalse(adminId(auth)).stream()
+                .map(Venda::getComissaoValor)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         List<VendaLinhaDto> linhas = vendas.stream()
                 .map(v -> new VendaLinhaDto(v.getTenantNome(), null, v.getPlano().name(),
-                        v.getValor(), v.getComissaoValor(), v.getOrigem(), v.getCriadoEm()))
+                        v.getValor(), v.getComissaoValor(), v.getOrigem(), v.isPago(), v.getCriadoEm()))
                 .toList();
-        return new MinhasVendasDto(vendas.size(), comissao, linhas);
+        return new MinhasVendasDto(vendas.size(), comissao, pendente, linhas);
     }
 
     @PostMapping("/login")

@@ -51,6 +51,14 @@ public class Venda {
     @Column(nullable = false)
     private String origem;
 
+    /** Comissão já acertada (paga) pro vendedor? */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean pago = false;
+
+    @Column(name = "pago_em")
+    private LocalDateTime pagoEm;
+
     @Column(name = "criado_em", nullable = false, updatable = false)
     private LocalDateTime criadoEm;
 

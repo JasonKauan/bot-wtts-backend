@@ -14,4 +14,12 @@ public interface VendaRepository extends JpaRepository<Venda, UUID> {
 
     /** Visão do vendedor: as vendas dele desde uma data. */
     List<Venda> findByVendedorIdAndCriadoEmGreaterThanEqualOrderByCriadoEmDesc(UUID vendedorId, LocalDateTime inicio);
+
+    /** Acerto de comissões: tudo que ainda não foi pago (com vendedor). */
+    List<Venda> findByPagoFalseAndVendedorIdIsNotNullOrderByCriadoEmDesc();
+
+    List<Venda> findByVendedorIdAndPagoFalse(UUID vendedorId);
+
+    /** Export CSV: histórico completo. */
+    List<Venda> findAllByOrderByCriadoEmDesc();
 }

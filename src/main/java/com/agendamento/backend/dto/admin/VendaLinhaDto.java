@@ -11,5 +11,6 @@ public record VendaLinhaDto(
         BigDecimal valor,
         BigDecimal comissaoValor,
         String origem,          // MANUAL | PIX
+        boolean pago,           // comissão já acertada?
         LocalDateTime criadoEm
 ) {}
