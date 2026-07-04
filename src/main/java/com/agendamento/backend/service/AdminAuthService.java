@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class AdminAuthService {
 
     public static final String ROLE_SUPERADMIN = "SUPERADMIN";
+    public static final String ROLE_VENDEDOR   = "VENDEDOR";
 
     private final UsuarioRepository usuarioRepository;
     private final JwtService jwtService;
@@ -29,8 +30,10 @@ public class AdminAuthService {
         Usuario usuario = usuarioRepository.findByEmail(req.getEmail())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciais inválidas."));
 
+        boolean papelDeBackoffice = ROLE_SUPERADMIN.equals(usuario.getRole())
+                || ROLE_VENDEDOR.equals(usuario.getRole());
         if (!passwordEncoder.matches(req.getSenha(), usuario.getSenha())
-                || !ROLE_SUPERADMIN.equals(usuario.getRole())
+                || !papelDeBackoffice
                 || !usuario.isAtivo()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciais inválidas.");
         }

@@ -14,4 +14,7 @@ public interface UsuarioRepository extends JpaRepository<Usuario, UUID> {
 
     /** Iteração 6: e-mail do dono para constar como pagador no Mercado Pago. */
     Optional<Usuario> findFirstByTenantId(UUID tenantId);
+
+    /** Gestão de vendedores (painel CEO). */
+    java.util.List<Usuario> findByRoleOrderByCriadoEmDesc(String role);
 }

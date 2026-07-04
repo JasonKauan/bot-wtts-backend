@@ -33,6 +33,7 @@ public class AssinaturaService {
     private final PagamentoRepository pagamentoRepository;
     private final UsuarioRepository usuarioRepository;
     private final MercadoPagoService mercadoPagoService;
+    private final VendaService vendaService;
 
     public AssinaturaStatusResponse status() {
         Tenant t = tenantAtual();
@@ -108,6 +109,8 @@ public class AssinaturaService {
             t.setPlano(pagamento.getPlano());
             t.setAssinaturaExpiraEm(LocalDateTime.now().plusDays(30)); // bot-zap: hoje + 30 dias
             tenantRepository.save(t);
+            // PIX pago pelo cliente também é venda — comissão vai pro vendedor da carteira.
+            vendaService.registrar(t, pagamento.getPlano(), "PIX");
             log.info("Assinatura ativada: tenant {} → plano {} até {}",
                     t.getId(), t.getPlano(), t.getAssinaturaExpiraEm());
         } else if ("rejected".equalsIgnoreCase(statusMp) || "cancelled".equalsIgnoreCase(statusMp)) {

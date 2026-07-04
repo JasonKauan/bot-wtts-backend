@@ -22,6 +22,14 @@ public class Usuario {
     @Column(name = "tenant_id")
     private UUID tenantId;
 
+    /** Nome de exibição (vendedor no ranking, etc.). Opcional. */
+    @Column
+    private String nome;
+
+    /** % de comissão por venda — só faz sentido para role VENDEDOR. */
+    @Column(name = "comissao_pct", precision = 5, scale = 2)
+    private java.math.BigDecimal comissaoPct;
+
     @Column(nullable = false, unique = true)
     private String email;
 

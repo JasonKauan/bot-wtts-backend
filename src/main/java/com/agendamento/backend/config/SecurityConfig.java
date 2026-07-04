@@ -46,7 +46,11 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/webhook/**").permitAll()
                 .requestMatchers("/api/admin/login").permitAll()
-                .requestMatchers("/api/admin/**").hasRole("SUPERADMIN")
+                // Só o CEO: visão financeira, gestão de vendedores, auditoria e utilidades.
+                .requestMatchers("/api/admin/ceo/**", "/api/admin/vendedores/**",
+                        "/api/admin/auditoria", "/api/admin/lembretes/**").hasRole("SUPERADMIN")
+                // Resto do back-office: CEO e vendedores (escopo por carteira é aplicado no controller).
+                .requestMatchers("/api/admin/**").hasAnyRole("SUPERADMIN", "VENDEDOR")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

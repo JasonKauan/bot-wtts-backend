@@ -40,23 +40,28 @@ public class AdminClienteService {
     private final AuthService authService;
     private final PasswordEncoder passwordEncoder;
     private final AuditoriaService auditoriaService;
+    private final VendaService vendaService;
 
-    /** Onboard de cliente. Devolve a senha provisória só se foi gerada (pro vendedor repassar). */
+    /** Onboard de cliente. vendedorId = carteira (nulo = "da casa"). */
     @Transactional
-    public SenhaResponse criar(CriarClienteRequest req) {
+    public SenhaResponse criar(CriarClienteRequest req, UUID vendedorId) {
         boolean gerada = isBlank(req.getSenha());
         String senha = gerada ? gerarSenha() : req.getSenha();
         int trialDias = req.getTrialDias() != null ? req.getTrialDias() : AuthService.TRIAL_DIAS_PADRAO;
 
         Tenant tenant = authService.criarTenantComDono(
                 req.getNome(), req.getTelefone(), req.getEmail(), senha, trialDias);
+        tenant.setVendedorId(vendedorId);   // carimbo da carteira
 
         // Opcional: já ativa um plano pago no onboard.
         String detalhe = "trial " + trialDias + "d";
         if (req.getPlano() != null) {
             aplicarPlano(tenant, req.getPlano());
-            tenantRepository.save(tenant);
             detalhe += " + " + req.getPlano().getPlano();
+        }
+        tenantRepository.save(tenant);
+        if (req.getPlano() != null) {
+            vendaService.registrar(tenant, req.getPlano().getPlano(), "MANUAL");
         }
         auditoriaService.registrar("CRIAR_CLIENTE", tenant.getId(), tenant.getNome(), detalhe);
         return new SenhaResponse(tenant.getId(), gerada ? senha : null);
@@ -68,6 +73,7 @@ public class AdminClienteService {
         Tenant t = buscar(id);
         aplicarPlano(t, req);
         tenantRepository.save(t);
+        vendaService.registrar(t, req.getPlano(), "MANUAL");   // TRIAL é ignorado lá dentro
         log.info("[admin] plano do tenant {} -> {} (modo {})", id, req.getPlano(), req.getModo());
         auditoriaService.registrar("ALTERAR_PLANO", id, t.getNome(), descricaoPlano(req));
     }

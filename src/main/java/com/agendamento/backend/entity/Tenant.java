@@ -67,6 +67,10 @@ public class Tenant {
     @Builder.Default
     private int antecedenciaMinHoras = 0;
 
+    /** Vendedor que trouxe este cliente (carteira). Nulo = cliente "da casa". */
+    @Column(name = "vendedor_id")
+    private UUID vendedorId;
+
     /** Plano de assinatura — Iteração 6. */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
