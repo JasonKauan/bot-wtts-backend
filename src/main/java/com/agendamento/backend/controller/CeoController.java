@@ -1,24 +1,32 @@
 package com.agendamento.backend.controller;
 
+import com.agendamento.backend.dto.admin.AcertarRequest;
 import com.agendamento.backend.dto.admin.AcertoDto;
+import com.agendamento.backend.dto.admin.AcertoHistoricoDto;
 import com.agendamento.backend.dto.admin.CeoResumoDto;
 import com.agendamento.backend.dto.admin.RankingVendedorDto;
 import com.agendamento.backend.dto.admin.VendaLinhaDto;
+import com.agendamento.backend.entity.AcertoComissao;
 import com.agendamento.backend.entity.Usuario;
 import com.agendamento.backend.entity.Venda;
+import com.agendamento.backend.repository.AcertoComissaoRepository;
 import com.agendamento.backend.repository.UsuarioRepository;
 import com.agendamento.backend.repository.VendaRepository;
 import com.agendamento.backend.service.AdminAuthService;
 import com.agendamento.backend.service.AuditoriaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +48,7 @@ public class CeoController {
 
     private final VendaRepository vendaRepository;
     private final UsuarioRepository usuarioRepository;
+    private final AcertoComissaoRepository acertoComissaoRepository;
     private final AuditoriaService auditoriaService;
 
     @GetMapping("/resumo")
@@ -98,27 +107,75 @@ public class CeoController {
                                 e.getValue().get(0).getVendedorEmail() != null
                                         ? e.getValue().get(0).getVendedorEmail() : "Vendedor removido"),
                         e.getValue().size(),
-                        soma(e.getValue(), Venda::getComissaoValor)))
+                        soma(e.getValue(), Venda::comissaoDevida)))
                 .sorted(Comparator.comparing(AcertoDto::comissaoPendente).reversed())
                 .toList();
     }
 
-    /** Marca TODAS as comissões pendentes do vendedor como pagas (acerto do período). */
+    /**
+     * Acerta as comissões pendentes do vendedor. Sem {@code valor} no body = quita TUDO.
+     * Com {@code valor} = acerto PARCIAL: paga da venda mais antiga pra mais nova; a venda
+     * que só foi coberta em parte acumula em {@code comissaoPagaParcial}. Gera histórico.
+     */
     @PostMapping("/acerto/{vendedorId}")
-    public Map<String, Object> acertar(@PathVariable UUID vendedorId) {
-        List<Venda> pendentes = vendaRepository.findByVendedorIdAndPagoFalse(vendedorId);
-        BigDecimal total = soma(pendentes, Venda::getComissaoValor);
+    @Transactional
+    public Map<String, Object> acertar(@PathVariable UUID vendedorId,
+                                       @RequestBody(required = false) AcertarRequest req) {
+        List<Venda> pendentes = vendaRepository.findByVendedorIdAndPagoFalseOrderByCriadoEmAsc(vendedorId);
+        BigDecimal pendenteTotal = soma(pendentes, Venda::comissaoDevida);
+
+        BigDecimal aPagar = (req != null && req.valor() != null) ? req.valor() : pendenteTotal;
+        if (aPagar.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valor do acerto deve ser maior que zero.");
+        }
+        if (aPagar.compareTo(pendenteTotal) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Valor maior que o pendente (R$ " + pendenteTotal + ").");
+        }
+
         LocalDateTime agora = LocalDateTime.now();
+        BigDecimal restante = aPagar;
+        int quitadas = 0;
         for (Venda v : pendentes) {
-            v.setPago(true);
-            v.setPagoEm(agora);
+            if (restante.compareTo(BigDecimal.ZERO) <= 0) break;
+            BigDecimal devida = v.comissaoDevida();
+            if (restante.compareTo(devida) >= 0) {
+                v.setPago(true);
+                v.setPagoEm(agora);
+                v.setComissaoPagaParcial(BigDecimal.ZERO);
+                restante = restante.subtract(devida);
+                quitadas++;
+            } else {
+                v.setComissaoPagaParcial(v.getComissaoPagaParcial().add(restante));
+                restante = BigDecimal.ZERO;
+            }
         }
         vendaRepository.saveAll(pendentes);
+
+        BigDecimal pendenteApos = pendenteTotal.subtract(aPagar);
         String vendedor = pendentes.isEmpty() ? vendedorId.toString()
-                : (pendentes.get(0).getVendedorEmail() != null ? pendentes.get(0).getVendedorEmail() : vendedorId.toString());
+                : nomesVendedores().getOrDefault(vendedorId,
+                        pendentes.get(0).getVendedorEmail() != null ? pendentes.get(0).getVendedorEmail() : vendedorId.toString());
+
+        acertoComissaoRepository.save(AcertoComissao.builder()
+                .vendedorId(vendedorId)
+                .vendedorNome(vendedor)
+                .valor(aPagar)
+                .vendasQuitadas(quitadas)
+                .pendenteApos(pendenteApos)
+                .build());
         auditoriaService.registrar("ACERTAR_COMISSAO", null, vendedor,
-                "R$ " + total + " (" + pendentes.size() + " venda(s))");
-        return Map.of("vendasAcertadas", pendentes.size(), "total", total);
+                "R$ " + aPagar + " (" + quitadas + " venda(s) quitada(s), pendente R$ " + pendenteApos + ")");
+        return Map.of("vendasAcertadas", quitadas, "total", aPagar, "pendenteRestante", pendenteApos);
+    }
+
+    /** Histórico dos últimos acertos de comissão (mais recentes primeiro). */
+    @GetMapping("/acertos")
+    public List<AcertoHistoricoDto> historicoAcertos() {
+        return acertoComissaoRepository.findTop50ByOrderByCriadoEmDesc().stream()
+                .map(a -> new AcertoHistoricoDto(a.getVendedorNome(), a.getValor(),
+                        a.getVendasQuitadas(), a.getPendenteApos(), a.getCriadoEm()))
+                .toList();
     }
 
     /** Exporta todas as vendas em CSV (separador ; — abre direto no Excel BR). */

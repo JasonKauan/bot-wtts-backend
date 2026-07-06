@@ -20,6 +20,9 @@ public interface VendaRepository extends JpaRepository<Venda, UUID> {
 
     List<Venda> findByVendedorIdAndPagoFalse(UUID vendedorId);
 
+    /** Acerto parcial: pendentes do vendedor, da mais antiga pra mais nova (paga na ordem). */
+    List<Venda> findByVendedorIdAndPagoFalseOrderByCriadoEmAsc(UUID vendedorId);
+
     /** Export CSV: histórico completo. */
     List<Venda> findAllByOrderByCriadoEmDesc();
 }

@@ -97,7 +97,7 @@ public class AdminController {
         BigDecimal comissao = vendas.stream().map(Venda::getComissaoValor)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal pendente = vendaRepository.findByVendedorIdAndPagoFalse(adminId(auth)).stream()
-                .map(Venda::getComissaoValor)
+                .map(Venda::comissaoDevida)   // desconta acertos parciais (V19)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         List<VendaLinhaDto> linhas = vendas.stream()
                 .map(v -> new VendaLinhaDto(v.getTenantNome(), null, v.getPlano().name(),

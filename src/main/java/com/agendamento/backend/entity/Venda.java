@@ -51,7 +51,7 @@ public class Venda {
     @Column(nullable = false)
     private String origem;
 
-    /** Comissão já acertada (paga) pro vendedor? */
+    /** Comissão já acertada (paga por inteiro) pro vendedor? */
     @Column(nullable = false)
     @Builder.Default
     private boolean pago = false;
@@ -59,9 +59,21 @@ public class Venda {
     @Column(name = "pago_em")
     private LocalDateTime pagoEm;
 
+    /** Quanto da comissão desta venda já foi pago em acertos PARCIAIS (V19). */
+    @Column(name = "comissao_paga_parcial", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal comissaoPagaParcial = BigDecimal.ZERO;
+
     @Column(name = "criado_em", nullable = false, updatable = false)
     private LocalDateTime criadoEm;
 
     @PrePersist
     protected void onCreate() { criadoEm = LocalDateTime.now(); }
+
+    /** Quanto desta comissão ainda falta pagar. */
+    public BigDecimal comissaoDevida() {
+        if (pago) return BigDecimal.ZERO;
+        BigDecimal parcial = comissaoPagaParcial != null ? comissaoPagaParcial : BigDecimal.ZERO;
+        return comissaoValor.subtract(parcial).max(BigDecimal.ZERO);
+    }
 }

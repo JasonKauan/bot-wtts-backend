@@ -1,10 +1,12 @@
 package com.agendamento.backend.service;
 
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Profissional;
 import com.agendamento.backend.entity.Servico;
 import com.agendamento.backend.entity.Tenant;
 import com.agendamento.backend.repository.AgendamentoRepository;
 import com.agendamento.backend.repository.BloqueioRepository;
+import com.agendamento.backend.repository.ProfissionalRepository;
 import com.agendamento.backend.repository.ServicoRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,10 @@ import java.util.UUID;
  * Ciente de DURAÇÃO: um serviço de 60min ocupa todos os slots que cobre, e um
  * candidato só é oferecido se couber inteiro (não estoura fechamento nem almoço).
  * Agendamentos PENDENTES e CONFIRMADOS seguram o horário.
+ *
+ * Grade POR PROFISSIONAL (V18): cada profissional pode ter dias/horários próprios;
+ * campo nulo herda o valor do estabelecimento (tenant). A resolução fica toda em
+ * {@link #gradeEfetiva(Tenant, UUID)} — bot e painel não precisam saber de nada.
  */
 @Service
 @RequiredArgsConstructor
@@ -31,6 +37,11 @@ public class DisponibilidadeService {
     private final AgendamentoRepository agendamentoRepository;
     private final ServicoRepository servicoRepository;
     private final BloqueioRepository bloqueioRepository;
+    private final ProfissionalRepository profissionalRepository;
+
+    /** Grade resolvida (tenant + sobreposições do profissional), em horas/minutos. */
+    public record Grade(int abertura, int fechamento, int intervalo,
+                        Integer almocoInicio, Integer almocoFim, String dias) {}
 
     /** Duração (min) do serviço pelo nome; fallback = intervalo da grade do tenant. */
     public int duracaoServico(Tenant t, String nomeServico) {
@@ -42,20 +53,41 @@ public class DisponibilidadeService {
         return Math.max(1, t.getIntervaloMinutos());
     }
 
+    /** Grade efetiva: valores do tenant, sobrepostos campo a campo pelos do profissional (se houver). */
+    public Grade gradeEfetiva(Tenant t, UUID profissionalId) {
+        Profissional p = profissionalId == null ? null
+                : profissionalRepository.findById(profissionalId)
+                        .filter(x -> x.getTenantId().equals(t.getId())).orElse(null);
+
+        int abertura   = (p != null && p.getHorarioAbertura()   != null) ? p.getHorarioAbertura()   : t.getHorarioAbertura();
+        int fechamento = (p != null && p.getHorarioFechamento() != null) ? p.getHorarioFechamento() : t.getHorarioFechamento();
+        // Almoço: se o profissional definiu o PRÓPRIO almoço, vale o dele por inteiro
+        // (inclusive "sem almoço" quando a grade é própria e ele não marcou almoço).
+        Integer almIni = t.getAlmocoInicio(), almFim = t.getAlmocoFim();
+        if (p != null && p.temGradePropria()) {
+            almIni = p.getAlmocoInicio();
+            almFim = p.getAlmocoFim();
+        }
+        String dias = (p != null && p.getDiasTrabalho() != null && !p.getDiasTrabalho().isBlank())
+                ? p.getDiasTrabalho() : t.getDiasFuncionamento();
+        return new Grade(abertura, fechamento, t.getIntervaloMinutos(), almIni, almFim, dias);
+    }
+
     /** Horários de início livres do dia para um serviço de {@code duracaoMin} minutos. */
     public List<String> horariosDisponiveis(Tenant t, LocalDate data, UUID profissionalId, int duracaoMin) {
-        if (!diaFunciona(t, data)) return List.of();   // fechado nesse dia da semana
+        Grade g = gradeEfetiva(t, profissionalId);
+        if (!diaFunciona(g.dias(), data)) return List.of();   // fechado / profissional de folga
         if (bloqueioRepository.existsByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
                 t.getId(), data, data)) return List.of();  // folga/feriado
 
         List<int[]> ocupados = ocupacoesDoDia(t, data, profissionalId);
         LocalDateTime agora = LocalDateTime.now();
-        int fimExpediente = t.getHorarioFechamento() * 60;
-        Integer almIni = t.getAlmocoInicio() != null ? t.getAlmocoInicio() * 60 : null;
-        Integer almFim = t.getAlmocoFim() != null ? t.getAlmocoFim() * 60 : null;
+        int fimExpediente = g.fechamento() * 60;
+        Integer almIni = g.almocoInicio() != null ? g.almocoInicio() * 60 : null;
+        Integer almFim = g.almocoFim() != null ? g.almocoFim() * 60 : null;
 
         List<String> livres = new ArrayList<>();
-        for (String h : gerarGrade(t)) {
+        for (String h : gerarGrade(g)) {
             int ini = emMinutos(h);
             int fim = ini + duracaoMin;
             if (fim > fimExpediente) continue;                                         // estoura o fechamento
@@ -76,7 +108,15 @@ public class DisponibilidadeService {
 
     /** O estabelecimento funciona nesse dia da semana? (dias ISO 1=seg..7=dom) */
     public boolean diaFunciona(Tenant t, LocalDate data) {
-        String dias = t.getDiasFuncionamento();
+        return diaFunciona(t.getDiasFuncionamento(), data);
+    }
+
+    /** O profissional (ou o estabelecimento, se nulo) atende nesse dia da semana? */
+    public boolean diaFunciona(Tenant t, UUID profissionalId, LocalDate data) {
+        return diaFunciona(gradeEfetiva(t, profissionalId).dias(), data);
+    }
+
+    private boolean diaFunciona(String dias, LocalDate data) {
         if (dias == null || dias.isBlank()) return true;
         String alvo = String.valueOf(data.getDayOfWeek().getValue());
         for (String p : dias.split(",")) {
@@ -85,13 +125,18 @@ public class DisponibilidadeService {
         return false;
     }
 
-    /** Grade do dia: de abertura a fechamento, de intervalo em intervalo, pulando o almoço. */
+    /** Grade do dia (do estabelecimento): de abertura a fechamento, pulando o almoço. */
     public List<String> gerarGrade(Tenant t) {
-        int intervalo = t.getIntervaloMinutos() > 0 ? t.getIntervaloMinutos() : 60;
-        int inicioMin = t.getHorarioAbertura() * 60;
-        int fimMin    = t.getHorarioFechamento() * 60;
-        Integer almIni = t.getAlmocoInicio() != null ? t.getAlmocoInicio() * 60 : null;
-        Integer almFim = t.getAlmocoFim()    != null ? t.getAlmocoFim()    * 60 : null;
+        return gerarGrade(gradeEfetiva(t, null));
+    }
+
+    /** Grade do dia: de abertura a fechamento, de intervalo em intervalo, pulando o almoço. */
+    private List<String> gerarGrade(Grade g) {
+        int intervalo = g.intervalo() > 0 ? g.intervalo() : 60;
+        int inicioMin = g.abertura() * 60;
+        int fimMin    = g.fechamento() * 60;
+        Integer almIni = g.almocoInicio() != null ? g.almocoInicio() * 60 : null;
+        Integer almFim = g.almocoFim()    != null ? g.almocoFim()    * 60 : null;
 
         List<String> slots = new ArrayList<>();
         for (int m = inicioMin; m < fimMin; m += intervalo) {

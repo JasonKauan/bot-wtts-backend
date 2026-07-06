@@ -34,19 +34,55 @@ public class ProfissionalController {
     @ResponseStatus(HttpStatus.CREATED)
     public Profissional criar(@Valid @RequestBody ProfissionalRequest req) {
         validarLimitePlano(); // Iteração 6
+        validarGrade(req);
         Profissional p = Profissional.builder()
                 .tenantId(TenantContext.get())
                 .nome(req.nome())
                 .ativo(true)
                 .build();
+        aplicarGrade(p, req);
         return repo.save(p);
     }
 
     @PutMapping("/{id}")
     public Profissional atualizar(@PathVariable UUID id, @Valid @RequestBody ProfissionalRequest req) {
+        validarGrade(req);
         Profissional p = buscarDoTenant(id);
         p.setNome(req.nome());
+        aplicarGrade(p, req);
         return repo.save(p);
+    }
+
+    /**
+     * Grade própria é tudo-ou-nada: com qualquer campo presente, abertura/fechamento/dias
+     * são obrigatórios (evita grade "meio herdada" ambígua). Sem nenhum campo = herda do tenant.
+     */
+    private void validarGrade(ProfissionalRequest req) {
+        if (!req.temGrade()) return;
+        if (req.horarioAbertura() == null || req.horarioFechamento() == null
+                || req.diasTrabalho() == null || req.diasTrabalho().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Grade própria precisa de abertura, fechamento e dias de trabalho.");
+        }
+        if (req.horarioFechamento() <= req.horarioAbertura()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Fechamento deve ser depois da abertura.");
+        }
+        boolean temAlmoco = req.almocoInicio() != null && req.almocoFim() != null;
+        if ((req.almocoInicio() != null) != (req.almocoFim() != null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe início e fim do almoço.");
+        }
+        if (temAlmoco && req.almocoFim() <= req.almocoInicio()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Fim do almoço deve ser depois do início.");
+        }
+    }
+
+    private void aplicarGrade(Profissional p, ProfissionalRequest req) {
+        boolean tem = req.temGrade();
+        p.setHorarioAbertura(tem ? req.horarioAbertura() : null);
+        p.setHorarioFechamento(tem ? req.horarioFechamento() : null);
+        p.setAlmocoInicio(tem ? req.almocoInicio() : null);
+        p.setAlmocoFim(tem ? req.almocoFim() : null);
+        p.setDiasTrabalho(tem ? req.diasTrabalho() : null);
     }
 
     @PatchMapping("/{id}/ativo")

@@ -29,8 +29,6 @@ import java.util.regex.Pattern;
  * serviço, profissional, data e hora de uma vez — o bot só pergunta o que faltar.
  * Quem reserva (disponibilidade, conflito, limite de plano) continua determinístico.
  * Sem IA, degrada para o fluxo de menu por número.
- *
- * TODO Iteração 7: grade horária por profissional (horários ainda hardcoded).
  */
 @Service
 @RequiredArgsConstructor
@@ -363,7 +361,10 @@ public class BotService {
                 if (s.getHoraEscolhida() != null || s.getDataEscolhida() == null) return;
                 List<String> disp = dispDaSessao(tenant, s.getDataEscolhida(), s);
                 Integer op = parsearOpcao(msg, disp.size());
-                if (op != null) s.setHoraEscolhida(disp.get(op - 1));
+                if (op != null) { s.setHoraEscolhida(disp.get(op - 1)); return; }
+                // Hora digitada ("16h", "16:30", "16") — determinístico, funciona sem IA.
+                String h = parsearHora(norm);
+                if (h != null && disp.contains(h)) s.setHoraEscolhida(h);
             }
         }
     }
@@ -430,7 +431,22 @@ public class BotService {
         String sugestao = (proxima != null)
                 ? " A próxima com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
                 : " Me diz outra data, por favor.";
-        enviar(tenant, telefone, "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕" + sugestao);
+        // Dia sem expediente (do profissional ou do estabelecimento) é diferente de dia lotado.
+        String motivo;
+        if (!disponibilidadeService.diaFunciona(tenant, s.getProfissionalId(), cheia)) {
+            motivo = s.getProfissionalEscolhido() != null
+                    ? "*" + s.getProfissionalEscolhido() + "* não atende " + comDiaSemana(cheia) + " 😕"
+                    : "A gente não abre " + comDiaSemana(cheia) + " 😕";
+        } else {
+            motivo = "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕";
+        }
+        enviar(tenant, telefone, motivo + sugestao);
+    }
+
+    /** "*30/06* (segunda)" — a pessoa entende na hora por que não deu. */
+    private String comDiaSemana(LocalDate d) {
+        String[] nomes = {"segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"};
+        return "*" + formatarData(d) + "* (" + nomes[d.getDayOfWeek().getValue() - 1] + ")";
     }
 
     // ── Slot-filling: ajuda quando não entendeu o passo atual ─────────────────
@@ -466,7 +482,9 @@ public class BotService {
         if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
 
         // Tentou um horário específico que não está livre? Sugere o(s) mais próximo(s) da lista real.
-        String desejado = aiService.interpretarHorario(msg);
+        // (parse determinístico primeiro; IA só como reforço)
+        String desejado = parsearHora(normalizar(msg));
+        if (desejado == null) desejado = aiService.interpretarHorario(msg);
         if (desejado != null && !disp.contains(desejado)) {
             List<String> sug = sugerirProximos(desejado, disp, 2);
             if (!sug.isEmpty()) {
@@ -1008,8 +1026,32 @@ public class BotService {
 
     private String formatarProfissionais(List<Profissional> profs) {
         var sb = new StringBuilder();
-        for (int i = 0; i < profs.size(); i++) sb.append(i+1).append(". ").append(profs.get(i).getNome()).append("\n");
+        for (int i = 0; i < profs.size(); i++) {
+            Profissional p = profs.get(i);
+            sb.append(i + 1).append(". ").append(p.getNome());
+            // Grade própria: mostra os dias — o cliente já escolhe sabendo quando ele atende.
+            String dias = diasCurto(p.getDiasTrabalho());
+            if (dias != null) sb.append(" _(").append(dias).append(")_");
+            sb.append("\n");
+        }
         return sb.toString().trim();
+    }
+
+    /** "1,2,3,4,5" → "seg a sex"; "2,4,6" → "ter, qui e sáb"; todos os dias → null (não precisa avisar). */
+    private String diasCurto(String diasCsv) {
+        if (diasCsv == null || diasCsv.isBlank()) return null;
+        String[] nomes = {"seg", "ter", "qua", "qui", "sex", "sáb", "dom"};
+        List<Integer> dias = Arrays.stream(diasCsv.split(","))
+                .map(String::trim).filter(x -> x.matches("[1-7]"))
+                .map(Integer::parseInt).distinct().sorted().toList();
+        if (dias.isEmpty() || dias.size() == 7) return null;
+        boolean contiguos = dias.get(dias.size() - 1) - dias.get(0) == dias.size() - 1;
+        if (contiguos && dias.size() >= 3)
+            return nomes[dias.get(0) - 1] + " a " + nomes[dias.get(dias.size() - 1) - 1];
+        if (dias.size() == 1) return nomes[dias.get(0) - 1];
+        String resto = dias.subList(0, dias.size() - 1).stream()
+                .map(d -> nomes[d - 1]).collect(java.util.stream.Collectors.joining(", "));
+        return resto + " e " + nomes[dias.get(dias.size() - 1) - 1];
     }
 
     private String formatarLista(List<String> items) {
@@ -1066,6 +1108,25 @@ public class BotService {
     private Integer parsearOpcao(String msg, int max) {
         try { int n = Integer.parseInt(msg.trim()); return (n >= 1 && n <= max) ? n : null; }
         catch (NumberFormatException e) { return null; }
+    }
+
+    /**
+     * Hora digitada: "16h", "16:30", "16h30", "as 16", "16". Devolve "HH:mm" ou null.
+     * Determinístico — o passo HORA funciona mesmo sem IA.
+     */
+    private String parsearHora(String norm) {
+        if (norm == null || norm.isBlank()) return null;
+        if (norm.contains("meio dia") || norm.contains("meio-dia")) return "12:00";
+        Matcher m = Pattern.compile("(?:^|\\s|as )(\\d{1,2})(?:\\s*[:h]\\s*(\\d{2}))?(?:\\s|h|$)").matcher(norm);
+        if (!m.find()) return null;
+        try {
+            int hh = Integer.parseInt(m.group(1));
+            int mm = m.group(2) != null ? Integer.parseInt(m.group(2)) : 0;
+            if (hh > 23 || mm > 59) return null;
+            // "4 da tarde" / "7 da noite" → 16h / 19h
+            if (hh < 12 && (norm.contains("tarde") || norm.contains("noite"))) hh += 12;
+            return String.format("%02d:%02d", hh, mm);
+        } catch (NumberFormatException e) { return null; }
     }
 
     private LocalDate parsearData(String norm) {
