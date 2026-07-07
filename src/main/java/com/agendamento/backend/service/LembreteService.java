@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -110,6 +111,58 @@ public class LembreteService {
                     tenant.getId(), ag.getClienteTelefone(), ag.getDataHora());
         }
         return enviados;
+    }
+
+    /**
+     * Resumo do dia pro DONO (V20): a agenda de hoje no WhatsApp dele, toda manhã.
+     * Roda a cada 30 min entre 6h e 10h — o Render free dorme e pode acordar tarde,
+     * então {@code resumoEnviadoEm} garante no máximo 1 envio por dia.
+     * Agenda vazia não gera mensagem (não incomoda à toa).
+     */
+    @Scheduled(cron = "0 */30 6-9 * * *")
+    @Transactional
+    public int enviarResumoDiario() {
+        LocalDate hoje = LocalDate.now();
+        int enviados = 0;
+        for (Tenant t : tenantRepository.findByAtivoTrue()) {
+            if (!t.isResumoDiario() || t.isAssinaturaVencida()) continue;
+            if (hoje.equals(t.getResumoEnviadoEm())) continue;
+            if (t.getTelefoneWhatsapp() == null || t.getTelefoneWhatsapp().isBlank()) continue;
+
+            List<Agendamento> doDia = agendamentoRepository
+                    .findByTenantIdAndDataHoraBetweenOrderByDataHora(
+                            t.getId(), hoje.atStartOfDay(), hoje.plusDays(1).atStartOfDay())
+                    .stream().filter(a -> "CONFIRMADO".equals(a.getStatus()) || "PENDENTE".equals(a.getStatus()))
+                    .toList();
+            if (doDia.isEmpty()) continue;
+
+            try {
+                evolutionApiService.enviarMensagemNaInstancia(
+                        t.getId().toString(), t.getTelefoneWhatsapp(), montarResumoDiario(doDia));
+                t.setResumoEnviadoEm(hoje);
+                tenantRepository.save(t);
+                enviados++;
+                log.info("[ResumoDiario] Enviado → tenant: {} ({} agendamentos)", t.getId(), doDia.size());
+            } catch (Exception e) {
+                // best-effort: tenta de novo na próxima rodada da manhã
+                log.warn("[ResumoDiario] Falha no tenant {}: {}", t.getId(), e.getMessage());
+            }
+        }
+        return enviados;
+    }
+
+    private String montarResumoDiario(List<Agendamento> doDia) {
+        StringBuilder sb = new StringBuilder("☀️ Bom dia! Sua agenda de hoje ("
+                + LocalDate.now().format(FMT_DATA) + "):\n");
+        for (Agendamento a : doDia) {
+            sb.append("\n⏰ *").append(a.getDataHora().format(FMT_HORA)).append("* — ").append(a.getServico());
+            if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
+            sb.append(" · ").append(a.getClienteNome());
+            if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando aprovação)_");
+        }
+        sb.append("\n\nTotal: *").append(doDia.size()).append(doDia.size() == 1 ? "* atendimento" : "* atendimentos")
+          .append(". Bom trabalho! 💪");
+        return sb.toString();
     }
 
     private String montarMensagemDoDia(Agendamento ag) {

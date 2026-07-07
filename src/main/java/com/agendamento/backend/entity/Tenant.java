@@ -67,6 +67,15 @@ public class Tenant {
     @Builder.Default
     private int antecedenciaMinHoras = 0;
 
+    /** Resumo diário da agenda no WhatsApp do dono, toda manhã (V20). */
+    @Column(name = "resumo_diario", nullable = false)
+    @Builder.Default
+    private boolean resumoDiario = true;
+
+    /** Última data em que o resumo diário foi enviado (dedupe do job). */
+    @Column(name = "resumo_enviado_em")
+    private java.time.LocalDate resumoEnviadoEm;
+
     /** Vendedor que trouxe este cliente (carteira). Nulo = cliente "da casa". */
     @Column(name = "vendedor_id")
     private UUID vendedorId;

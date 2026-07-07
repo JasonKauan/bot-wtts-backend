@@ -431,12 +431,16 @@ public class BotService {
         String sugestao = (proxima != null)
                 ? " A próxima com vaga é *" + formatarData(proxima) + "* — é só me mandar ela (ou outra) 😊"
                 : " Me diz outra data, por favor.";
-        // Dia sem expediente (do profissional ou do estabelecimento) é diferente de dia lotado.
+        // Dia sem expediente, folga marcada e dia lotado são coisas diferentes — explica a certa.
         String motivo;
         if (!disponibilidadeService.diaFunciona(tenant, s.getProfissionalId(), cheia)) {
             motivo = s.getProfissionalEscolhido() != null
                     ? "*" + s.getProfissionalEscolhido() + "* não atende " + comDiaSemana(cheia) + " 😕"
                     : "A gente não abre " + comDiaSemana(cheia) + " 😕";
+        } else if (disponibilidadeService.diaBloqueado(tenant, s.getProfissionalId(), cheia)) {
+            motivo = s.getProfissionalEscolhido() != null
+                    ? "*" + s.getProfissionalEscolhido() + "* está de folga " + comDiaSemana(cheia) + " 😕"
+                    : "Estamos de folga " + comDiaSemana(cheia) + " 😕";
         } else {
             motivo = "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕";
         }

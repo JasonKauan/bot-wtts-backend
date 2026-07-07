@@ -11,7 +11,7 @@ public interface BloqueioRepository extends JpaRepository<Bloqueio, UUID> {
 
     List<Bloqueio> findByTenantIdOrderByDataInicioAsc(UUID tenantId);
 
-    /** A data cai dentro de algum bloqueio do tenant? (data_inicio <= data <= data_fim) */
-    boolean existsByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
+    /** Bloqueios do tenant que cobrem a data (o chamador decide se vale pro profissional). */
+    List<Bloqueio> findByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
             UUID tenantId, LocalDate inicio, LocalDate fim);
 }

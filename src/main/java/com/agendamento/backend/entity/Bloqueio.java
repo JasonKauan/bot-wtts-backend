@@ -7,7 +7,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/** Folga/feriado: período (data_inicio..data_fim, inclusivo) em que o estabelecimento não atende. */
+/**
+ * Folga/feriado: período (data_inicio..data_fim, inclusivo) em que o estabelecimento não atende.
+ * Com {@code profissionalId} preenchido (V21), a folga vale só pra esse profissional.
+ */
 @Entity
 @Table(name = "bloqueio")
 @Data
@@ -22,6 +25,10 @@ public class Bloqueio {
 
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
+
+    /** Nulo = folga do estabelecimento inteiro. */
+    @Column(name = "profissional_id")
+    private UUID profissionalId;
 
     @Column(name = "data_inicio", nullable = false)
     private LocalDate dataInicio;

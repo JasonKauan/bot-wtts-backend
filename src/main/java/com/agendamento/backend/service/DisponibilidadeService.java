@@ -73,12 +73,22 @@ public class DisponibilidadeService {
         return new Grade(abertura, fechamento, t.getIntervaloMinutos(), almIni, almFim, dias);
     }
 
+    /**
+     * O dia está bloqueado por folga/feriado? Bloqueio sem profissional fecha o estabelecimento
+     * inteiro; bloqueio de um profissional só vale quando é ELE que está sendo consultado (V21).
+     */
+    public boolean diaBloqueado(Tenant t, UUID profissionalId, LocalDate data) {
+        return bloqueioRepository
+                .findByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(t.getId(), data, data)
+                .stream().anyMatch(b -> b.getProfissionalId() == null
+                        || b.getProfissionalId().equals(profissionalId));
+    }
+
     /** Horários de início livres do dia para um serviço de {@code duracaoMin} minutos. */
     public List<String> horariosDisponiveis(Tenant t, LocalDate data, UUID profissionalId, int duracaoMin) {
         Grade g = gradeEfetiva(t, profissionalId);
-        if (!diaFunciona(g.dias(), data)) return List.of();   // fechado / profissional de folga
-        if (bloqueioRepository.existsByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
-                t.getId(), data, data)) return List.of();  // folga/feriado
+        if (!diaFunciona(g.dias(), data)) return List.of();   // fechado / profissional não trabalha nesse dia
+        if (diaBloqueado(t, profissionalId, data)) return List.of();  // folga/feriado
 
         List<int[]> ocupados = ocupacoesDoDia(t, data, profissionalId);
         LocalDateTime agora = LocalDateTime.now();
