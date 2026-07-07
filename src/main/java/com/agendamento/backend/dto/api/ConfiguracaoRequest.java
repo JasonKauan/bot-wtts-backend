@@ -15,5 +15,6 @@ public record ConfiguracaoRequest(
         String diasFuncionamento,                 // ISO "1,2,3,4,5,6,7"
         boolean aprovacaoManual,                  // fila de aprovação on/off
         @Min(0) @Max(72) int antecedenciaMinHoras, // 0 = sem regra
-        boolean resumoDiario                      // agenda do dia no WhatsApp do dono (V20)
+        boolean resumoDiario,                     // agenda do dia no WhatsApp do dono (V20)
+        @Min(0) @Max(10) int faltasParaAprovacao  // escudo anti-faltão (V23); 0 = desligado
 ) {}

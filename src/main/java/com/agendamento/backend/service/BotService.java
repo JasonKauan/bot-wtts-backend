@@ -57,6 +57,7 @@ public class BotService {
     private final EvolutionApiService     evolutionApiService;
     private final PlanoService            planoService;
     private final AiService               aiService;
+    private final ListaEsperaService      listaEsperaService;
 
     @Async
     @Transactional
@@ -177,6 +178,12 @@ public class BotService {
         }
 
         session.setUltimaInteracao(LocalDateTime.now());
+
+        // Lista de espera (V22): o bot informou um dia lotado e o cliente respondeu "avisa".
+        if (session.getEsperaData() != null && isQueroAviso(norm)) {
+            entrarNaListaDeEspera(session, telefone, clienteNome, tenant);
+            return;
+        }
 
         // MENU de boas-vindas: opções 1-4; texto livre cai no slot-filling (atalho).
         if ("MENU".equals(session.getEtapa())) {
@@ -433,6 +440,7 @@ public class BotService {
                 : " Me diz outra data, por favor.";
         // Dia sem expediente, folga marcada e dia lotado são coisas diferentes — explica a certa.
         String motivo;
+        boolean lotado = false;
         if (!disponibilidadeService.diaFunciona(tenant, s.getProfissionalId(), cheia)) {
             motivo = s.getProfissionalEscolhido() != null
                     ? "*" + s.getProfissionalEscolhido() + "* não atende " + comDiaSemana(cheia) + " 😕"
@@ -443,14 +451,58 @@ public class BotService {
                     : "Estamos de folga " + comDiaSemana(cheia) + " 😕";
         } else {
             motivo = "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕";
+            lotado = true;
         }
-        enviar(tenant, telefone, motivo + sugestao);
+        // Dia LOTADO (não folga/fechado) em agendamento novo → oferece a lista de espera.
+        String espera = "";
+        if (lotado && s.getRemarcandoId() == null) {
+            s.setEsperaData(cheia);
+            botSessionRepository.save(s);
+            espera = "\n\n_Ou responda *avisa* que eu te chamo se abrir vaga em " + formatarData(cheia) + "._";
+        }
+        enviar(tenant, telefone, motivo + sugestao + espera);
     }
 
     /** "*30/06* (segunda)" — a pessoa entende na hora por que não deu. */
     private String comDiaSemana(LocalDate d) {
         String[] nomes = {"segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"};
         return "*" + formatarData(d) + "* (" + nomes[d.getDayOfWeek().getValue() - 1] + ")";
+    }
+
+    // ── Lista de espera (V22) ─────────────────────────────────────────────────
+
+    private boolean isQueroAviso(String n) {
+        return n.contains("avisa") || n.contains("avise") || n.contains("lista de espera")
+                || n.contains("me chama") || n.contains("me avise");
+    }
+
+    /** Coloca o cliente na fila do dia lotado e segue a conversa pedindo outra data. */
+    private void entrarNaListaDeEspera(BotSession s, String telefone, String clienteNome, Tenant tenant) {
+        LocalDate dia = s.getEsperaData();
+        s.setEsperaData(null);
+        s.setEtapa("DATA");
+        s.setTentativas(0);
+        botSessionRepository.save(s);
+
+        if (dia.isBefore(LocalDate.now())) {   // fila de um dia que já passou não faz sentido
+            enviar(tenant, telefone, "Esse dia já passou 😅 Me diz outra data que eu vejo pra você!");
+            return;
+        }
+        boolean entrou = listaEsperaService.entrar(tenant, telefone, clienteNome,
+                s.getServicoEscolhido(), s.getProfissionalId(), s.getProfissionalEscolhido(), dia);
+        enviar(tenant, telefone, (entrou
+                ? "🔔 Fechado! Se abrir vaga em *" + formatarData(dia) + "* eu te chamo aqui na hora."
+                : "Você já está na fila de *" + formatarData(dia) + "* — te aviso se abrir vaga 😉")
+                + "\n\nEnquanto isso, quer garantir outro dia? _(hoje, amanhã ou dd/mm)_");
+    }
+
+    /** Escudo anti-faltão (V23): N+ faltas nos últimos 90 dias → exige aprovação do dono. */
+    private boolean exigeAprovacaoPorFaltas(Tenant t, String telefone) {
+        int limite = t.getFaltasParaAprovacao();
+        if (limite <= 0) return false;
+        long faltas = agendamentoRepository.countByTenantIdAndClienteTelefoneAndStatusAndDataHoraAfter(
+                t.getId(), telefone, "NAO_COMPARECEU", LocalDateTime.now().minusDays(90));
+        return faltas >= limite;
     }
 
     // ── Slot-filling: ajuda quando não entendeu o passo atual ─────────────────
@@ -551,7 +603,8 @@ public class BotService {
                 return;
             }
 
-            boolean fila = tenant.isAprovacaoManual();
+            // Fila global do tenant OU escudo anti-faltão deste cliente (V23).
+            boolean fila = tenant.isAprovacaoManual() || exigeAprovacaoPorFaltas(tenant, telefone);
 
             // REMARCAÇÃO: move o agendamento existente em vez de criar um novo.
             if (session.getRemarcandoId() != null) {
@@ -562,11 +615,13 @@ public class BotService {
                     return;
                 }
                 Agendamento antigo = antigoOpt.get();
+                LocalDate diaLiberado = antigo.getDataHora().toLocalDate();  // o horário antigo abre vaga
                 antigo.setDataHora(dataHora);
                 antigo.setStatus(fila ? "PENDENTE" : "CONFIRMADO");
                 antigo.setLembreteEnviado(false);      // novo horário → lembretes valem de novo
                 antigo.setLembreteDiaEnviado(false);
                 agendamentoRepository.save(antigo);
+                listaEsperaService.notificarProximo(tenant, diaLiberado);
                 log.info("[{}] Agendamento {} remarcado para {} ({})", tenant.getId(), antigo.getId(), dataHora, antigo.getStatus());
                 enviar(tenant, telefone, fila
                         ? "📝 Recebi sua remarcação de *" + antigo.getServico() + "* pra *" + formatarDataHora(dataHora) + "*! Vou confirmar e te aviso 👍"
@@ -703,6 +758,7 @@ public class BotService {
                     "Tudo bem! Agendamento cancelado. 😊\n\nQuer reagendar? Mande *oi* para recomeçar.");
             avisarDono(tenant, "❌ *" + ag.getClienteNome() + "* cancelou (respondendo o lembrete): *"
                     + ag.getServico() + "* — " + formatarDataHora(ag.getDataHora()) + ".");
+            listaEsperaService.notificarProximo(tenant, ag.getDataHora().toLocalDate());
         }
     }
 
@@ -892,6 +948,7 @@ public class BotService {
                     + "). 😊\n\nSe quiser remarcar, é só mandar *oi*.");
             avisarDono(tenant, "❌ *" + ag.getClienteNome() + "* cancelou: *" + ag.getServico()
                     + "* — " + formatarDataHora(ag.getDataHora()) + ".\nO horário ficou livre.");
+            listaEsperaService.notificarProximo(tenant, ag.getDataHora().toLocalDate());
 
         } else if ("nao".equals(norm) || "n".equals(norm)) {
             botSessionRepository.delete(session);

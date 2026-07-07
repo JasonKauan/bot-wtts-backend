@@ -13,6 +13,7 @@ import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.security.TenantContext;
 import com.agendamento.backend.service.DisponibilidadeService;
 import com.agendamento.backend.service.EvolutionApiService;
+import com.agendamento.backend.service.ListaEsperaService;
 import com.agendamento.backend.service.PlanoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class AgendamentoController {
     private final DisponibilidadeService disponibilidadeService;
     private final PlanoService planoService;
     private final EvolutionApiService evolutionApiService;
+    private final ListaEsperaService listaEsperaService;
 
     /**
      * Agendamento manual pelo dono (cliente que ligou/chegou na porta). Vale como ENCAIXE:
@@ -107,7 +109,10 @@ public class AgendamentoController {
     @PatchMapping("/{id}/cancelar")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void cancelar(@PathVariable UUID id) {
-        atualizarStatus(id, "CANCELADO");
+        Agendamento ag = buscar(id);
+        ag.setStatus("CANCELADO");
+        repo.save(ag);
+        notificarListaEspera(ag);   // horário liberado → chama o 1º da fila do dia
     }
 
     @PatchMapping("/{id}/confirmar")
@@ -134,6 +139,7 @@ public class AgendamentoController {
         repo.save(ag);
         notificar(ag, "😕 Poxa, não foi possível confirmar seu horário de *" + ag.getServico() + "* em *"
                 + ag.getDataHora().format(FMT) + "*. Quer tentar outro? É só mandar *oi* que a gente acha um horário 👍");
+        notificarListaEspera(ag);
     }
 
     @PatchMapping("/{id}/nao-compareceu")
@@ -156,6 +162,12 @@ public class AgendamentoController {
         Agendamento ag = buscar(id);
         ag.setStatus(status);
         repo.save(ag);
+    }
+
+    /** Horário liberado: avisa o primeiro da lista de espera do dia (best-effort). */
+    private void notificarListaEspera(Agendamento ag) {
+        tenantRepository.findById(ag.getTenantId())
+                .ifPresent(t -> listaEsperaService.notificarProximo(t, ag.getDataHora().toLocalDate()));
     }
 
     /** Manda WhatsApp pro cliente pela instância do tenant; nunca derruba a requisição se a IA/Evolution falhar. */

@@ -1,20 +1,30 @@
 package com.agendamento.backend.controller;
 
+import com.agendamento.backend.dto.api.FaturamentoLinha;
 import com.agendamento.backend.dto.api.RelatorioDto;
 import com.agendamento.backend.dto.api.ServicoContagem;
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Servico;
 import com.agendamento.backend.repository.AgendamentoRepository;
+import com.agendamento.backend.repository.ServicoRepository;
 import com.agendamento.backend.security.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Relatórios simples do estabelecimento (janela -30d a +7d, calculado em memória). */
@@ -24,6 +34,7 @@ import java.util.stream.Collectors;
 public class RelatorioController {
 
     private final AgendamentoRepository repo;
+    private final ServicoRepository servicoRepository;
 
     @GetMapping
     public RelatorioDto relatorio() {
@@ -43,7 +54,9 @@ public class RelatorioController {
                 .filter(a -> !a.getDataHora().isAfter(agora)) // dataHora <= agora
                 .toList();
 
-        long realizados = passados.stream().filter(a -> "CONFIRMADO".equals(a.getStatus())).count();
+        List<Agendamento> atendidos = passados.stream()
+                .filter(a -> "CONFIRMADO".equals(a.getStatus())).toList();
+        long realizados = atendidos.size();
         long faltas     = passados.stream().filter(a -> "NAO_COMPARECEU".equals(a.getStatus())).count();
         long cancelados = passados.stream().filter(a -> "CANCELADO".equals(a.getStatus())).count();
 
@@ -59,6 +72,72 @@ public class RelatorioController {
                 .map(e -> new ServicoContagem(e.getKey(), e.getValue()))
                 .toList();
 
-        return new RelatorioDto(proximos7, realizados, faltas, cancelados, taxaFalta, servicosTop);
+        // ── Financeiro: receita estimada dos atendidos (preço atual do serviço) ──
+        Map<String, BigDecimal> precos = precosPorNome(tenantId);
+        BigDecimal receita30 = atendidos.stream()
+                .map(a -> precoDe(a, precos)).reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<FaturamentoLinha> porServico = agrupar(atendidos, Agendamento::getServico, precos);
+        List<FaturamentoLinha> porProfissional = agrupar(atendidos,
+                a -> a.getProfissional() != null ? a.getProfissional() : "Sem profissional", precos);
+
+        return new RelatorioDto(proximos7, realizados, faltas, cancelados, taxaFalta, servicosTop,
+                receita30, porServico, porProfissional);
+    }
+
+    /** Export CSV: atendimentos realizados dos últimos 30 dias, com preço (abre no Excel BR). */
+    @GetMapping("/financeiro.csv")
+    public ResponseEntity<byte[]> financeiroCsv() {
+        UUID tenantId = TenantContext.get();
+        LocalDateTime agora = LocalDateTime.now();
+        Map<String, BigDecimal> precos = precosPorNome(tenantId);
+        DateTimeFormatter fData = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+        DateTimeFormatter fHora = DateTimeFormatter.ofPattern("HH:mm");
+
+        StringBuilder sb = new StringBuilder("Data;Hora;Servico;Profissional;Cliente;Preco estimado\n");
+        repo.findByTenantIdAndDataHoraBetweenOrderByDataHora(tenantId, agora.minusDays(30), agora)
+                .stream().filter(a -> "CONFIRMADO".equals(a.getStatus()))
+                .forEach(a -> sb.append(a.getDataHora().format(fData)).append(';')
+                        .append(a.getDataHora().format(fHora)).append(';')
+                        .append(csv(a.getServico())).append(';')
+                        .append(csv(a.getProfissional())).append(';')
+                        .append(csv(a.getClienteNome())).append(';')
+                        .append(precoDe(a, precos).toPlainString().replace('.', ',')).append('\n'));
+
+        byte[] corpo = ("﻿" + sb).getBytes(StandardCharsets.UTF_8);   // BOM pro Excel
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=financeiro.csv")
+                .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .body(corpo);
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /** Preço atual por nome de serviço (agendamento guarda o nome, não o id). */
+    private Map<String, BigDecimal> precosPorNome(UUID tenantId) {
+        return servicoRepository.findByTenantIdAndAtivoTrue(tenantId).stream()
+                .filter(s -> s.getPreco() != null)
+                .collect(Collectors.toMap(Servico::getNome, Servico::getPreco, (a, b) -> a));
+    }
+
+    private BigDecimal precoDe(Agendamento a, Map<String, BigDecimal> precos) {
+        return precos.getOrDefault(a.getServico(), BigDecimal.ZERO);
+    }
+
+    private List<FaturamentoLinha> agrupar(List<Agendamento> atendidos,
+                                           Function<Agendamento, String> chave,
+                                           Map<String, BigDecimal> precos) {
+        return atendidos.stream()
+                .collect(Collectors.groupingBy(chave))
+                .entrySet().stream()
+                .map(e -> new FaturamentoLinha(e.getKey(), e.getValue().size(),
+                        e.getValue().stream().map(a -> precoDe(a, precos))
+                                .reduce(BigDecimal.ZERO, BigDecimal::add)))
+                .sorted(Comparator.comparing(FaturamentoLinha::receita).reversed())
+                .toList();
+    }
+
+    private String csv(String s) {
+        if (s == null) return "";
+        return s.replace(';', ',').replace('\n', ' ');
     }
 }

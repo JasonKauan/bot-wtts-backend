@@ -68,6 +68,10 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     /** Iteração 6: agendamentos criados no mês corrente, para o limite do plano. */
     long countByTenantIdAndCriadoEmGreaterThanEqual(UUID tenantId, LocalDateTime inicio);
 
+    /** Escudo anti-faltão (V23): faltas do cliente na janela recente. */
+    long countByTenantIdAndClienteTelefoneAndStatusAndDataHoraAfter(
+            UUID tenantId, String clienteTelefone, String status, LocalDateTime depois);
+
     /** CRM leve: todo o histórico do tenant (agregado em memória — volume pequeno por estabelecimento). */
     List<Agendamento> findByTenantId(UUID tenantId);
 }

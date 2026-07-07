@@ -47,6 +47,7 @@ public class ConfiguracaoController {
         t.setAprovacaoManual(req.aprovacaoManual());
         t.setAntecedenciaMinHoras(req.antecedenciaMinHoras());
         t.setResumoDiario(req.resumoDiario());
+        t.setFaltasParaAprovacao(req.faltasParaAprovacao());
         return toDto(tenantRepository.save(t));
     }
 
@@ -54,7 +55,8 @@ public class ConfiguracaoController {
         return new ConfiguracaoResponse(t.getId(), t.getNome(), t.getTelefoneWhatsapp(),
                 t.getHorarioAbertura(), t.getHorarioFechamento(),
                 t.getIntervaloMinutos(), t.getAlmocoInicio(), t.getAlmocoFim(), t.getDiasFuncionamento(),
-                t.isAprovacaoManual(), t.getAntecedenciaMinHoras(), t.isResumoDiario());
+                t.isAprovacaoManual(), t.getAntecedenciaMinHoras(), t.isResumoDiario(),
+                t.getFaltasParaAprovacao());
     }
 
     private Tenant buscarTenant() {

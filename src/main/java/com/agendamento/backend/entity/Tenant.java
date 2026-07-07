@@ -72,6 +72,11 @@ public class Tenant {
     @Builder.Default
     private boolean resumoDiario = true;
 
+    /** Escudo anti-faltão (V23): N+ faltas em 90 dias → cai na fila de aprovação. 0 = desligado. */
+    @Column(name = "faltas_para_aprovacao", nullable = false)
+    @Builder.Default
+    private int faltasParaAprovacao = 0;
+
     /** Última data em que o resumo diário foi enviado (dedupe do job). */
     @Column(name = "resumo_enviado_em")
     private java.time.LocalDate resumoEnviadoEm;

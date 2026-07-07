@@ -47,6 +47,10 @@ public class BotSession {
     @Column(name = "remarcando_id")
     private UUID remarcandoId;
 
+    /** Último dia informado como lotado (V22): um "avisa" do cliente entra na fila desse dia. */
+    @Column(name = "espera_data")
+    private LocalDate esperaData;
+
     @Column(nullable = false)
     private int tentativas;
 
