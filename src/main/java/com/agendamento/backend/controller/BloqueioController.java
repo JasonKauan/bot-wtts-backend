@@ -45,6 +45,14 @@ public class BloqueioController {
         if (fim.isBefore(req.dataInicio())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A data final não pode ser antes da inicial.");
         }
+        // Compromisso avulso (V24): as duas horas juntas, e fim depois do início.
+        boolean temHora = req.horaInicio() != null && req.horaFim() != null;
+        if ((req.horaInicio() != null) != (req.horaFim() != null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o início e o fim do horário.");
+        }
+        if (temHora && req.horaFim().compareTo(req.horaInicio()) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O fim deve ser depois do início.");
+        }
         Profissional prof = null;
         if (req.profissionalId() != null) {
             prof = profissionalRepository.findById(req.profissionalId())
@@ -56,11 +64,14 @@ public class BloqueioController {
                 .profissionalId(prof != null ? prof.getId() : null)
                 .dataInicio(req.dataInicio())
                 .dataFim(fim)
+                .horaInicio(temHora ? req.horaInicio() : null)
+                .horaFim(temHora ? req.horaFim() : null)
                 .descricao(req.descricao())
                 .build();
         b = repo.save(b);
         return new BloqueioDto(b.getId(), b.getDataInicio(), b.getDataFim(), b.getDescricao(),
-                b.getProfissionalId(), prof != null ? prof.getNome() : null);
+                b.getProfissionalId(), prof != null ? prof.getNome() : null,
+                b.getHoraInicio(), b.getHoraFim());
     }
 
     @DeleteMapping("/{id}")
@@ -76,6 +87,7 @@ public class BloqueioController {
     private BloqueioDto toDto(Bloqueio b, Map<UUID, String> nomes) {
         return new BloqueioDto(b.getId(), b.getDataInicio(), b.getDataFim(), b.getDescricao(),
                 b.getProfissionalId(),
-                b.getProfissionalId() != null ? nomes.get(b.getProfissionalId()) : null);
+                b.getProfissionalId() != null ? nomes.get(b.getProfissionalId()) : null,
+                b.getHoraInicio(), b.getHoraFim());
     }
 }

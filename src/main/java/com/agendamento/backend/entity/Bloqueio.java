@@ -36,6 +36,19 @@ public class Bloqueio {
     @Column(name = "data_fim", nullable = false)
     private LocalDate dataFim;
 
+    // ── Compromisso avulso (V24): bloqueia só uma faixa do dia. Nulos = dia inteiro ──
+
+    @Column(name = "hora_inicio")
+    private String horaInicio;   // "HH:mm"
+
+    @Column(name = "hora_fim")
+    private String horaFim;      // "HH:mm"
+
+    /** Bloqueio de dia inteiro (folga/feriado) ou só de uma faixa de horas? */
+    public boolean isDiaInteiro() {
+        return horaInicio == null || horaFim == null;
+    }
+
     @Column
     private String descricao;
 

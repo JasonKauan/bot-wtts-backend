@@ -16,4 +16,5 @@ public record ConfiguracaoResponse(
         boolean aprovacaoManual,
         int antecedenciaMinHoras,
         boolean resumoDiario,
-        int faltasParaAprovacao) {}
+        int faltasParaAprovacao,
+        boolean permiteCombo) {}

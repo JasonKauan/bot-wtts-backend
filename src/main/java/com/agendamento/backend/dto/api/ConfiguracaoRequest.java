@@ -16,5 +16,6 @@ public record ConfiguracaoRequest(
         boolean aprovacaoManual,                  // fila de aprovação on/off
         @Min(0) @Max(72) int antecedenciaMinHoras, // 0 = sem regra
         boolean resumoDiario,                     // agenda do dia no WhatsApp do dono (V20)
-        @Min(0) @Max(10) int faltasParaAprovacao  // escudo anti-faltão (V23); 0 = desligado
+        @Min(0) @Max(10) int faltasParaAprovacao, // escudo anti-faltão (V23); 0 = desligado
+        boolean permiteCombo                      // "corte e barba" num agendamento só (V25)
 ) {}

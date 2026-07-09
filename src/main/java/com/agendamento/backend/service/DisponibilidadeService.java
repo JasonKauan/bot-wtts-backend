@@ -1,6 +1,7 @@
 package com.agendamento.backend.service;
 
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Bloqueio;
 import com.agendamento.backend.entity.Profissional;
 import com.agendamento.backend.entity.Servico;
 import com.agendamento.backend.entity.Tenant;
@@ -74,14 +75,28 @@ public class DisponibilidadeService {
     }
 
     /**
-     * O dia está bloqueado por folga/feriado? Bloqueio sem profissional fecha o estabelecimento
-     * inteiro; bloqueio de um profissional só vale quando é ELE que está sendo consultado (V21).
+     * O dia INTEIRO está bloqueado por folga/feriado? Bloqueio sem profissional fecha o
+     * estabelecimento; bloqueio de um profissional só vale quando é ELE que está sendo
+     * consultado (V21). Bloqueios de faixa de horas (V24) NÃO fecham o dia — viram
+     * ocupação em {@link #bloqueiosParciais}.
      */
     public boolean diaBloqueado(Tenant t, UUID profissionalId, LocalDate data) {
         return bloqueioRepository
                 .findByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(t.getId(), data, data)
-                .stream().anyMatch(b -> b.getProfissionalId() == null
-                        || b.getProfissionalId().equals(profissionalId));
+                .stream().anyMatch(b -> b.isDiaInteiro()
+                        && (b.getProfissionalId() == null || b.getProfissionalId().equals(profissionalId)));
+    }
+
+    /** Compromissos avulsos do dia (V24), em minutos [ini, fim) — entram como horário ocupado. */
+    private List<int[]> bloqueiosParciais(Tenant t, LocalDate data, UUID profissionalId) {
+        List<int[]> out = new ArrayList<>();
+        for (Bloqueio b : bloqueioRepository
+                .findByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(t.getId(), data, data)) {
+            if (b.isDiaInteiro()) continue;
+            if (b.getProfissionalId() != null && !b.getProfissionalId().equals(profissionalId)) continue;
+            out.add(new int[]{emMinutos(b.getHoraInicio()), emMinutos(b.getHoraFim())});
+        }
+        return out;
     }
 
     /** Horários de início livres do dia para um serviço de {@code duracaoMin} minutos. */
@@ -91,6 +106,7 @@ public class DisponibilidadeService {
         if (diaBloqueado(t, profissionalId, data)) return List.of();  // folga/feriado
 
         List<int[]> ocupados = ocupacoesDoDia(t, data, profissionalId);
+        ocupados.addAll(bloqueiosParciais(t, data, profissionalId));   // compromissos avulsos (V24)
         LocalDateTime agora = LocalDateTime.now();
         int fimExpediente = g.fechamento() * 60;
         Integer almIni = g.almocoInicio() != null ? g.almocoInicio() * 60 : null;
@@ -110,10 +126,12 @@ public class DisponibilidadeService {
         return livres;
     }
 
-    /** true se [inicio, inicio+duracaoMin) colide com algum agendamento ativo do dia. */
+    /** true se [inicio, inicio+duracaoMin) colide com agendamento ativo ou compromisso avulso do dia. */
     public boolean conflita(Tenant t, UUID profissionalId, LocalDateTime inicio, int duracaoMin) {
         int ini = inicio.getHour() * 60 + inicio.getMinute();
-        return temConflito(ocupacoesDoDia(t, inicio.toLocalDate(), profissionalId), ini, ini + duracaoMin);
+        List<int[]> ocupados = ocupacoesDoDia(t, inicio.toLocalDate(), profissionalId);
+        ocupados.addAll(bloqueiosParciais(t, inicio.toLocalDate(), profissionalId));
+        return temConflito(ocupados, ini, ini + duracaoMin);
     }
 
     /** O estabelecimento funciona nesse dia da semana? (dias ISO 1=seg..7=dom) */

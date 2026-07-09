@@ -48,6 +48,7 @@ public class ConfiguracaoController {
         t.setAntecedenciaMinHoras(req.antecedenciaMinHoras());
         t.setResumoDiario(req.resumoDiario());
         t.setFaltasParaAprovacao(req.faltasParaAprovacao());
+        t.setPermiteCombo(req.permiteCombo());
         return toDto(tenantRepository.save(t));
     }
 
@@ -56,7 +57,7 @@ public class ConfiguracaoController {
                 t.getHorarioAbertura(), t.getHorarioFechamento(),
                 t.getIntervaloMinutos(), t.getAlmocoInicio(), t.getAlmocoFim(), t.getDiasFuncionamento(),
                 t.isAprovacaoManual(), t.getAntecedenciaMinHoras(), t.isResumoDiario(),
-                t.getFaltasParaAprovacao());
+                t.getFaltasParaAprovacao(), t.isPermiteCombo());
     }
 
     private Tenant buscarTenant() {

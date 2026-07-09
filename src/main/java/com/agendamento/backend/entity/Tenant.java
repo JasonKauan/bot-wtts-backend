@@ -77,6 +77,11 @@ public class Tenant {
     @Builder.Default
     private int faltasParaAprovacao = 0;
 
+    /** Combos no bot (V25): "corte e barba" vira um agendamento só, com duração somada. */
+    @Column(name = "permite_combo", nullable = false)
+    @Builder.Default
+    private boolean permiteCombo = true;
+
     /** Última data em que o resumo diário foi enviado (dedupe do job). */
     @Column(name = "resumo_enviado_em")
     private java.time.LocalDate resumoEnviadoEm;

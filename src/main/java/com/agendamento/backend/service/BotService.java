@@ -343,6 +343,16 @@ public class BotService {
         switch (s.getEtapa()) {
             case "SERVICO" -> {
                 if (s.getServicoEscolhido() != null) return;
+                // Combo (V25): "corte e barba" = um agendamento só, duração somada (se o tenant permite).
+                if (tenant.isPermiteCombo()) {
+                    List<Servico> combo = detectarCombo(norm, servicos);
+                    if (combo.size() >= 2) {
+                        s.setServicoEscolhido(combo.stream().map(Servico::getNome)
+                                .collect(java.util.stream.Collectors.joining(" + ")));
+                        s.setDuracaoMinutos(combo.stream().mapToInt(sv -> Math.max(1, sv.getDuracaoMinutos())).sum());
+                        return;
+                    }
+                }
                 Integer op = parsearOpcao(msg, servicos.size());
                 if (op == null)
                     for (int i = 0; i < servicos.size(); i++)
@@ -414,7 +424,8 @@ public class BotService {
         switch (slot) {
             case "SERVICO" -> enviar(tenant, telefone,
                     escolher("Qual serviço você quer? 😊", "Me diz o que você quer fazer:", "Pra começar, qual serviço? 😊")
-                    + "\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
+                    + "\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId()))
+                    + (tenant.isPermiteCombo() ? "\n\n_Pode pedir mais de um, ex.: \"corte e barba\"_ 😉" : ""));
             case "PROFISSIONAL" -> enviar(tenant, telefone,
                     resumoParcial(s) + "👤 Com qual profissional?\n\n" + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
             case "DATA" -> enviar(tenant, telefone,
@@ -588,7 +599,7 @@ public class BotService {
                 }
             }
             LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(session.getHoraEscolhida()));
-            int duracao = disponibilidadeService.duracaoServico(tenant, session.getServicoEscolhido());
+            int duracao = duracaoDaSessao(tenant, session);
 
             // Re-checa conflito (por profissional, ciente de duração): alguém pode ter reservado durante a conversa.
             if (disponibilidadeService.conflita(tenant, session.getProfissionalId(), dataHora, duracao)) {
@@ -702,6 +713,7 @@ public class BotService {
             var match = servicos.stream().filter(sv -> nomeBate(sv.getNome(), ex.servico)).findFirst();
             if (match.isPresent() && !match.get().getNome().equals(s.getServicoEscolhido())) {
                 s.setServicoEscolhido(match.get().getNome());
+                s.setDuracaoMinutos(null);   // trocou de serviço → a duração de combo anterior não vale mais
                 mudou = true;
             }
         }
@@ -873,6 +885,7 @@ public class BotService {
         session.setProfissionalEscolhido(prof != null ? prof.getNome() : null);
         session.setDataEscolhida(null);
         session.setHoraEscolhida(null);
+        session.setDuracaoMinutos(ultimo.getDuracaoMinutos());   // combos repetem com a duração certa
         session.setRemarcandoId(null);   // é um agendamento NOVO, não remarcação
         session.setTentativas(0);
         session.setUltimaInteracao(LocalDateTime.now());
@@ -909,6 +922,7 @@ public class BotService {
         session.setProfissionalEscolhido(ag.getProfissional());
         session.setDataEscolhida(null);
         session.setHoraEscolhida(null);
+        session.setDuracaoMinutos(ag.getDuracaoMinutos());   // remarcar combo mantém a duração somada
         session.setRemarcandoId(ag.getId());
         session.setTentativas(0);
         session.setUltimaInteracao(LocalDateTime.now());
@@ -1025,8 +1039,28 @@ public class BotService {
 
     /** Disponibilidade da sessão: usa a DURAÇÃO do serviço escolhido (fonte única: DisponibilidadeService). */
     private List<String> dispDaSessao(Tenant tenant, LocalDate data, BotSession s) {
-        int dur = disponibilidadeService.duracaoServico(tenant, s.getServicoEscolhido());
-        return disponibilidadeService.horariosDisponiveis(tenant, data, s.getProfissionalId(), dur);
+        return disponibilidadeService.horariosDisponiveis(tenant, data, s.getProfissionalId(), duracaoDaSessao(tenant, s));
+    }
+
+    /** Duração da sessão: a do combo/remarcação quando setada; senão a do serviço pelo nome. */
+    private int duracaoDaSessao(Tenant tenant, BotSession s) {
+        return s.getDuracaoMinutos() != null ? s.getDuracaoMinutos()
+                : disponibilidadeService.duracaoServico(tenant, s.getServicoEscolhido());
+    }
+
+    /**
+     * Combo (V25): quebra a frase em partes ("corte e barba", "corte, barba e sobrancelha")
+     * e devolve os serviços distintos que casam com 2+ partes. Menos que 2 = não é combo.
+     */
+    private List<Servico> detectarCombo(String norm, List<Servico> servicos) {
+        java.util.LinkedHashMap<String, Servico> achados = new java.util.LinkedHashMap<>();
+        for (String parte : norm.split("\\s*(?:,|\\+| e )\\s*")) {
+            if (parte.isBlank()) continue;
+            for (Servico sv : servicos) {
+                if (nomeBate(sv.getNome(), parte)) { achados.putIfAbsent(sv.getNome(), sv); break; }
+            }
+        }
+        return new ArrayList<>(achados.values());
     }
 
     /** Prefixo com o que já sabemos: "*Corte* com *Raphael* 👍\n\n". Vazio se nada definido. */

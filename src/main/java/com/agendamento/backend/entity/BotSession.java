@@ -51,6 +51,10 @@ public class BotSession {
     @Column(name = "espera_data")
     private LocalDate esperaData;
 
+    /** Duração (min) da sessão quando difere da do serviço — usado por COMBOS (V25) e remarcação. */
+    @Column(name = "duracao_minutos")
+    private Integer duracaoMinutos;
+
     @Column(nullable = false)
     private int tentativas;
 
