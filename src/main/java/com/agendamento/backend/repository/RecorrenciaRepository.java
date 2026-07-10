@@ -13,4 +13,7 @@ public interface RecorrenciaRepository extends JpaRepository<Recorrencia, UUID> 
 
     /** Job diário: recorrências ativas cuja próxima ocorrência está na janela de geração. */
     List<Recorrencia> findByAtivoTrueAndProximaDataLessThanEqual(LocalDate limite);
+
+    /** Excluir profissional: barra se algum cliente fixo ativo depende dele. */
+    boolean existsByTenantIdAndProfissionalIdAndAtivoTrue(UUID tenantId, UUID profissionalId);
 }

@@ -14,4 +14,7 @@ public interface BloqueioRepository extends JpaRepository<Bloqueio, UUID> {
     /** Bloqueios do tenant que cobrem a data (o chamador decide se vale pro profissional). */
     List<Bloqueio> findByTenantIdAndDataInicioLessThanEqualAndDataFimGreaterThanEqual(
             UUID tenantId, LocalDate inicio, LocalDate fim);
+
+    /** Excluir profissional: as folgas dele vão junto (chamar dentro de @Transactional). */
+    void deleteByTenantIdAndProfissionalId(UUID tenantId, UUID profissionalId);
 }

@@ -3,16 +3,21 @@ package com.agendamento.backend.controller;
 import com.agendamento.backend.dto.api.ProfissionalRequest;
 import com.agendamento.backend.entity.Profissional;
 import com.agendamento.backend.entity.Tenant;
+import com.agendamento.backend.repository.AgendamentoRepository;
+import com.agendamento.backend.repository.BloqueioRepository;
 import com.agendamento.backend.repository.ProfissionalRepository;
+import com.agendamento.backend.repository.RecorrenciaRepository;
 import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.security.TenantContext;
 import com.agendamento.backend.service.PlanoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,6 +29,9 @@ public class ProfissionalController {
     private final ProfissionalRepository repo;
     private final TenantRepository tenantRepository;
     private final PlanoService planoService;
+    private final AgendamentoRepository agendamentoRepository;
+    private final RecorrenciaRepository recorrenciaRepository;
+    private final BloqueioRepository bloqueioRepository;
 
     @GetMapping
     public List<Profissional> listar() {
@@ -83,6 +91,30 @@ public class ProfissionalController {
         p.setAlmocoInicio(tem ? req.almocoInicio() : null);
         p.setAlmocoFim(tem ? req.almocoFim() : null);
         p.setDiasTrabalho(tem ? req.diasTrabalho() : null);
+    }
+
+    /**
+     * Exclusão de verdade. O histórico antigo NÃO se perde (o agendamento guarda o nome).
+     * Barra se houver horário futuro ativo ou cliente fixo dependendo dele — mensagem
+     * diz exatamente o que resolver. As folgas do profissional são removidas junto.
+     */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    public void remover(@PathVariable UUID id) {
+        Profissional p = buscarDoTenant(id);
+        UUID tenantId = TenantContext.get();
+        if (agendamentoRepository.existsByTenantIdAndProfissionalIdAndStatusInAndDataHoraAfter(
+                tenantId, id, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Esse profissional ainda tem horários futuros marcados. Cancele ou remarque esses horários — ou apenas Desative o profissional.");
+        }
+        if (recorrenciaRepository.existsByTenantIdAndProfissionalIdAndAtivoTrue(tenantId, id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Esse profissional está em um cliente fixo. Remova ou pause o cliente fixo (aba Clientes fixos) antes de excluir.");
+        }
+        bloqueioRepository.deleteByTenantIdAndProfissionalId(tenantId, id);
+        repo.delete(p);
     }
 
     @PatchMapping("/{id}/ativo")
