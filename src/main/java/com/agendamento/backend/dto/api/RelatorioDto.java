@@ -14,5 +14,6 @@ public record RelatorioDto(
         // Financeiro (estimado pelo preço ATUAL de cada serviço; serviço sem preço conta R$ 0)
         BigDecimal receita30Dias,
         List<FaturamentoLinha> receitaPorServico,
-        List<FaturamentoLinha> receitaPorProfissional
+        List<FaturamentoLinha> receitaPorProfissional,
+        boolean financeiroLiberado   // false = plano sem o recurso (frontend mostra upgrade)
 ) {}

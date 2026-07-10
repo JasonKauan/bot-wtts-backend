@@ -49,7 +49,7 @@ public class AssinaturaService {
     @Transactional
     public PixResponse gerarPix(Plano plano) {
         if (plano == null || plano == Plano.TRIAL) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Escolha um plano pago (BASICO, PRO ou PLUS).");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Escolha um plano pago (Gold, Platinum ou Diamond).");
         }
         Tenant t = tenantAtual();
 

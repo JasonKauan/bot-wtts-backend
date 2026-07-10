@@ -1,7 +1,6 @@
 package com.agendamento.backend.service;
 
 import com.agendamento.backend.entity.*;
-import com.agendamento.backend.exception.LimitePlanoException;
 import com.agendamento.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,7 +54,6 @@ public class BotService {
     private final ProfissionalRepository  profissionalRepository;
     private final DisponibilidadeService  disponibilidadeService;
     private final EvolutionApiService     evolutionApiService;
-    private final PlanoService            planoService;
     private final AiService               aiService;
     private final ListaEsperaService      listaEsperaService;
     private final BotMensagemService      botMensagemService;
@@ -393,8 +391,8 @@ public class BotService {
         switch (s.getEtapa()) {
             case "SERVICO" -> {
                 if (s.getServicoEscolhido() != null) return;
-                // Combo (V25): "corte e barba" = um agendamento só, duração somada (se o tenant permite).
-                if (tenant.isPermiteCombo()) {
+                // Combo (V25): "corte e barba" = um agendamento só, duração somada (toggle + plano Platinum+).
+                if (tenant.isPermiteCombo() && tenant.getPlano().permite(Plano.Recurso.COMBOS)) {
                     List<Servico> combo = detectarCombo(norm, servicos);
                     if (combo.size() >= 2) {
                         s.setServicoEscolhido(combo.stream().map(Servico::getNome)
@@ -475,7 +473,8 @@ public class BotService {
             case "SERVICO" -> enviar(tenant, telefone,
                     escolher("Qual serviço você quer? 😊", "Me diz o que você quer fazer:", "Pra começar, qual serviço? 😊")
                     + "\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId()))
-                    + (tenant.isPermiteCombo() ? "\n\n_Pode pedir mais de um, ex.: \"corte e barba\"_ 😉" : ""));
+                    + (tenant.isPermiteCombo() && tenant.getPlano().permite(Plano.Recurso.COMBOS)
+                            ? "\n\n_Pode pedir mais de um, ex.: \"corte e barba\"_ 😉" : ""));
             case "PROFISSIONAL" -> enviar(tenant, telefone,
                     resumoParcial(s) + "👤 Com qual profissional?\n\n" + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
             case "DATA" -> enviar(tenant, telefone,
@@ -514,9 +513,10 @@ public class BotService {
             motivo = "Pra *" + formatarData(cheia) + "* não tenho mais horário 😕";
             lotado = true;
         }
-        // Dia LOTADO (não folga/fechado) em agendamento novo → oferece a lista de espera.
+        // Dia LOTADO (não folga/fechado) em agendamento novo → oferece a lista de espera (Platinum+).
         String espera = "";
-        if (lotado && s.getRemarcandoId() == null) {
+        if (lotado && s.getRemarcandoId() == null
+                && tenant.getPlano().permite(Plano.Recurso.LISTA_ESPERA)) {
             s.setEsperaData(cheia);
             botSessionRepository.save(s);
             espera = "\n\n_Ou responda *avisa* que eu te chamo se abrir vaga em " + formatarData(cheia) + "._";
@@ -560,7 +560,7 @@ public class BotService {
     /** Escudo anti-faltão (V23): N+ faltas nos últimos 90 dias → exige aprovação do dono. */
     private boolean exigeAprovacaoPorFaltas(Tenant t, String telefone) {
         int limite = t.getFaltasParaAprovacao();
-        if (limite <= 0) return false;
+        if (limite <= 0 || !t.getPlano().permite(Plano.Recurso.ESCUDO_FALTAO)) return false;
         long faltas = agendamentoRepository.countByTenantIdAndClienteTelefoneAndStatusAndDataHoraAfter(
                 t.getId(), telefone, "NAO_COMPARECEU", LocalDateTime.now().minusDays(90));
         return faltas >= limite;
@@ -635,19 +635,7 @@ public class BotService {
             else if (ai == 2) norm = "nao";
         }
         if ("sim".equals(norm) || "s".equals(norm)) {
-            // Limite de plano só vale pra agendamento NOVO (remarcar apenas move um existente).
-            if (session.getRemarcandoId() == null && !emSimulacao()) {
-                try {
-                    planoService.validarNovoAgendamento(tenant); // Iteração 6: limite do plano
-                } catch (LimitePlanoException e) {
-                    botSessionRepository.delete(session);
-                    log.warn("[{}] Agendamento bloqueado pelo limite do plano: {}", tenant.getId(), e.getMessage());
-                    enviar(tenant, telefone,
-                            "😔 No momento não conseguimos registrar novos agendamentos por aqui. " +
-                            "Por favor, entre em contato direto com o estabelecimento.");
-                    return;
-                }
-            }
+            // Agendamentos são ilimitados em todos os planos (decisão 2026-07-10).
             LocalDateTime dataHora = LocalDateTime.of(session.getDataEscolhida(), LocalTime.parse(session.getHoraEscolhida()));
             int duracao = duracaoDaSessao(tenant, session);
 
@@ -673,8 +661,10 @@ public class BotService {
                 return;
             }
 
-            // Fila global do tenant OU escudo anti-faltão deste cliente (V23).
-            boolean fila = tenant.isAprovacaoManual() || exigeAprovacaoPorFaltas(tenant, telefone);
+            // Fila global do tenant OU escudo anti-faltão deste cliente (V23) — ambos Platinum+.
+            boolean fila = (tenant.isAprovacaoManual()
+                            && tenant.getPlano().permite(Plano.Recurso.FILA_APROVACAO))
+                    || exigeAprovacaoPorFaltas(tenant, telefone);
 
             // REMARCAÇÃO: move o agendamento existente em vez de criar um novo.
             if (session.getRemarcandoId() != null) {

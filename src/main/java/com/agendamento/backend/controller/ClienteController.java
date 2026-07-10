@@ -2,8 +2,10 @@ package com.agendamento.backend.controller;
 
 import com.agendamento.backend.dto.api.ClienteCrmDto;
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.repository.AgendamentoRepository;
 import com.agendamento.backend.security.TenantContext;
+import com.agendamento.backend.service.PlanoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,9 +24,11 @@ import java.util.stream.Collectors;
 public class ClienteController {
 
     private final AgendamentoRepository repo;
+    private final PlanoService planoService;
 
     @GetMapping
     public List<ClienteCrmDto> listar() {
+        planoService.exigir(TenantContext.get(), Plano.Recurso.CRM);
         LocalDateTime agora = LocalDateTime.now();
         List<Agendamento> todos = repo.findByTenantId(TenantContext.get());
 

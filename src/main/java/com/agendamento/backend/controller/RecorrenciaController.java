@@ -2,6 +2,7 @@ package com.agendamento.backend.controller;
 
 import com.agendamento.backend.dto.api.RecorrenciaDto;
 import com.agendamento.backend.dto.api.RecorrenciaRequest;
+import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.entity.Profissional;
 import com.agendamento.backend.entity.Recorrencia;
 import com.agendamento.backend.entity.Servico;
@@ -9,6 +10,7 @@ import com.agendamento.backend.repository.ProfissionalRepository;
 import com.agendamento.backend.repository.RecorrenciaRepository;
 import com.agendamento.backend.repository.ServicoRepository;
 import com.agendamento.backend.security.TenantContext;
+import com.agendamento.backend.service.PlanoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,6 +30,7 @@ public class RecorrenciaController {
     private final RecorrenciaRepository repo;
     private final ServicoRepository servicoRepository;
     private final ProfissionalRepository profissionalRepository;
+    private final PlanoService planoService;
 
     @GetMapping
     public List<RecorrenciaDto> listar() {
@@ -39,6 +42,7 @@ public class RecorrenciaController {
     @ResponseStatus(HttpStatus.CREATED)
     public RecorrenciaDto criar(@Valid @RequestBody RecorrenciaRequest req) {
         UUID tenantId = TenantContext.get();
+        planoService.exigir(tenantId, Plano.Recurso.RECORRENCIA);
         if (req.primeiraData().isBefore(LocalDate.now())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A primeira data não pode estar no passado.");
         }
@@ -68,6 +72,7 @@ public class RecorrenciaController {
 
     @PatchMapping("/{id}/ativo")
     public RecorrenciaDto toggleAtivo(@PathVariable UUID id) {
+        planoService.exigir(TenantContext.get(), Plano.Recurso.RECORRENCIA);
         Recorrencia r = buscarDoTenant(id);
         r.setAtivo(!r.isAtivo());
         return toDto(repo.save(r));

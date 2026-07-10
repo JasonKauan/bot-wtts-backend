@@ -1,9 +1,9 @@
 package com.agendamento.backend.service;
 
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.entity.Recorrencia;
 import com.agendamento.backend.entity.Tenant;
-import com.agendamento.backend.exception.LimitePlanoException;
 import com.agendamento.backend.repository.AgendamentoRepository;
 import com.agendamento.backend.repository.RecorrenciaRepository;
 import com.agendamento.backend.repository.TenantRepository;
@@ -41,7 +41,6 @@ public class RecorrenciaService {
     private final TenantRepository tenantRepository;
     private final DisponibilidadeService disponibilidadeService;
     private final EvolutionApiService evolutionApiService;
-    private final PlanoService planoService;
 
     /** Roda de manhã cedo, todo dia (janela larga: o Render free pode acordar tarde). */
     @Scheduled(cron = "0 45 4-9 * * *")
@@ -56,6 +55,7 @@ public class RecorrenciaService {
         for (Recorrencia r : recorrenciaRepository.findByAtivoTrueAndProximaDataLessThanEqual(limite)) {
             Tenant t = tenants.get(r.getTenantId());
             if (t == null || t.isAssinaturaVencida()) continue;   // suspenso/vencido não gera
+            if (!t.getPlano().permite(Plano.Recurso.RECORRENCIA)) continue;   // recurso Diamond
 
             // Catch-up: se o servidor ficou fora e a data passou, pula pra próxima futura.
             while (r.getProximaData().isBefore(hoje)) {
@@ -74,26 +74,20 @@ public class RecorrenciaService {
                         + "* (" + r.getServico() + ") em *" + dataHora.format(FMT)
                         + "* — o horário está ocupado. Encaixe na mão pelo painel, se quiser.");
             } else {
-                try {
-                    planoService.validarNovoAgendamento(t);
-                    agendamentoRepository.save(Agendamento.builder()
-                            .tenantId(t.getId())
-                            .clienteNome(r.getClienteNome())
-                            .clienteTelefone(r.getClienteTelefone() != null ? r.getClienteTelefone() : "")
-                            .servico(r.getServico())
-                            .profissional(r.getProfissional())
-                            .profissionalId(r.getProfissionalId())
-                            .duracaoMinutos(dur)
-                            .dataHora(dataHora)
-                            .status("CONFIRMADO")
-                            .origem("FIXO")
-                            .build());
-                    criados++;
-                    log.info("[Recorrencia] Gerado {} em {} (tenant {})", r.getClienteNome(), dataHora, t.getId());
-                } catch (LimitePlanoException e) {
-                    avisarDono(t, "⚠️ Não consegui renovar o horário fixo de *" + r.getClienteNome()
-                            + "* em *" + dataHora.format(FMT) + "*: " + e.getMessage());
-                }
+                agendamentoRepository.save(Agendamento.builder()
+                        .tenantId(t.getId())
+                        .clienteNome(r.getClienteNome())
+                        .clienteTelefone(r.getClienteTelefone() != null ? r.getClienteTelefone() : "")
+                        .servico(r.getServico())
+                        .profissional(r.getProfissional())
+                        .profissionalId(r.getProfissionalId())
+                        .duracaoMinutos(dur)
+                        .dataHora(dataHora)
+                        .status("CONFIRMADO")
+                        .origem("FIXO")
+                        .build());
+                criados++;
+                log.info("[Recorrencia] Gerado {} em {} (tenant {})", r.getClienteNome(), dataHora, t.getId());
             }
 
             r.setProximaData(r.getProximaData().plusDays(r.getFrequenciaDias()));

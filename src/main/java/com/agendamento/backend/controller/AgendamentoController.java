@@ -14,7 +14,6 @@ import com.agendamento.backend.security.TenantContext;
 import com.agendamento.backend.service.DisponibilidadeService;
 import com.agendamento.backend.service.EvolutionApiService;
 import com.agendamento.backend.service.ListaEsperaService;
-import com.agendamento.backend.service.PlanoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -39,7 +38,6 @@ public class AgendamentoController {
     private final ProfissionalRepository profissionalRepository;
     private final TenantRepository tenantRepository;
     private final DisponibilidadeService disponibilidadeService;
-    private final PlanoService planoService;
     private final EvolutionApiService evolutionApiService;
     private final ListaEsperaService listaEsperaService;
 
@@ -69,8 +67,6 @@ public class AgendamentoController {
         if (dataHora.isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Esse horário já passou.");
         }
-
-        planoService.validarNovoAgendamento(tenant); // limite do plano vale pro manual também
 
         int duracao = Math.max(1, servico.getDuracaoMinutos());
         if (disponibilidadeService.conflita(tenant, prof != null ? prof.getId() : null, dataHora, duracao)) {

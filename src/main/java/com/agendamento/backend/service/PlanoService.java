@@ -3,44 +3,51 @@ package com.agendamento.backend.service;
 import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.entity.Tenant;
 import com.agendamento.backend.exception.LimitePlanoException;
-import com.agendamento.backend.repository.AgendamentoRepository;
 import com.agendamento.backend.repository.ProfissionalRepository;
+import com.agendamento.backend.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
-/** Valida os limites de uso de cada plano (Iteração 6). */
+/**
+ * Limites e recursos por plano. Agendamentos são ilimitados em todos os planos
+ * (decisão 2026-07-10); o que varia é o nº de profissionais e os recursos (Plano.Recurso).
+ */
 @Service
 @RequiredArgsConstructor
 public class PlanoService {
 
-    private final AgendamentoRepository agendamentoRepository;
     private final ProfissionalRepository profissionalRepository;
+    private final TenantRepository tenantRepository;
 
-    /** Limite de agendamentos criados no mês corrente (BASICO: 100). */
-    public void validarNovoAgendamento(Tenant tenant) {
-        int max = tenant.getPlano().getMaxAgendamentosMes();
-        if (max == Integer.MAX_VALUE) return;
-
-        LocalDateTime inicioMes = LocalDate.now().withDayOfMonth(1).atStartOfDay();
-        long criadosNoMes = agendamentoRepository.countByTenantIdAndCriadoEmGreaterThanEqual(tenant.getId(), inicioMes);
-        if (criadosNoMes >= max) {
-            throw new LimitePlanoException("Limite de agendamentos atingido. Faça upgrade do plano.");
-        }
-    }
-
-    /** Limite de profissionais ativos (BASICO: 1, PRO: 5). */
+    /** Limite de profissionais ativos (GOLD: 2, PLATINUM: 5, DIAMOND/TRIAL: ilimitado). */
     public void validarNovoProfissional(UUID tenantId, Plano plano) {
         int max = plano.getMaxProfissionais();
         if (max == Integer.MAX_VALUE) return;
 
         long ativos = profissionalRepository.countByTenantIdAndAtivoTrue(tenantId);
         if (ativos >= max) {
-            throw new LimitePlanoException("Plano " + plano + " suporta apenas "
-                    + max + " profissional(is). Faça upgrade do plano.");
+            throw new LimitePlanoException("O plano " + plano.getNomeBonito() + " permite até "
+                    + max + " profissionais ativos. Faça upgrade na aba Assinatura.");
+        }
+    }
+
+    /** O tenant tem acesso ao recurso? (não lança — pra decisões silenciosas no bot/jobs) */
+    public boolean permite(Tenant tenant, Plano.Recurso recurso) {
+        return tenant.getPlano().permite(recurso);
+    }
+
+    /** Barra a requisição com 403 + mensagem de upgrade quando o plano não cobre o recurso. */
+    public void exigir(UUID tenantId, Plano.Recurso recurso) {
+        Tenant t = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+        if (!t.getPlano().permite(recurso)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Esse recurso faz parte do plano " + Plano.minimoPara(recurso)
+                    + ". Faça upgrade na aba Assinatura 😉");
         }
     }
 }

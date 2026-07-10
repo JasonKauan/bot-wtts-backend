@@ -126,6 +126,7 @@ public class LembreteService {
         int enviados = 0;
         for (Tenant t : tenantRepository.findByAtivoTrue()) {
             if (!t.isResumoDiario() || t.isAssinaturaVencida()) continue;
+            if (!t.getPlano().permite(com.agendamento.backend.entity.Plano.Recurso.RESUMO_DIARIO)) continue;
             if (hoje.equals(t.getResumoEnviadoEm())) continue;
             if (t.getTelefoneWhatsapp() == null || t.getTelefoneWhatsapp().isBlank()) continue;
 

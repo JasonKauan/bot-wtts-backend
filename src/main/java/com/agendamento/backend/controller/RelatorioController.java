@@ -4,10 +4,13 @@ import com.agendamento.backend.dto.api.FaturamentoLinha;
 import com.agendamento.backend.dto.api.RelatorioDto;
 import com.agendamento.backend.dto.api.ServicoContagem;
 import com.agendamento.backend.entity.Agendamento;
+import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.entity.Servico;
 import com.agendamento.backend.repository.AgendamentoRepository;
 import com.agendamento.backend.repository.ServicoRepository;
+import com.agendamento.backend.repository.TenantRepository;
 import com.agendamento.backend.security.TenantContext;
+import com.agendamento.backend.service.PlanoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -35,6 +38,8 @@ public class RelatorioController {
 
     private final AgendamentoRepository repo;
     private final ServicoRepository servicoRepository;
+    private final TenantRepository tenantRepository;
+    private final PlanoService planoService;
 
     @GetMapping
     public RelatorioDto relatorio() {
@@ -72,22 +77,30 @@ public class RelatorioController {
                 .map(e -> new ServicoContagem(e.getKey(), e.getValue()))
                 .toList();
 
-        // ── Financeiro: receita estimada dos atendidos (preço atual do serviço) ──
-        Map<String, BigDecimal> precos = precosPorNome(tenantId);
-        BigDecimal receita30 = atendidos.stream()
-                .map(a -> precoDe(a, precos)).reduce(BigDecimal.ZERO, BigDecimal::add);
-        List<FaturamentoLinha> porServico = agrupar(atendidos, Agendamento::getServico, precos);
-        List<FaturamentoLinha> porProfissional = agrupar(atendidos,
-                a -> a.getProfissional() != null ? a.getProfissional() : "Sem profissional", precos);
+        // ── Financeiro (recurso Diamond): receita estimada dos atendidos ──
+        boolean financeiroLiberado = tenantRepository.findById(tenantId)
+                .map(t -> t.getPlano().permite(Plano.Recurso.FINANCEIRO)).orElse(false);
+        BigDecimal receita30 = BigDecimal.ZERO;
+        List<FaturamentoLinha> porServico = List.of();
+        List<FaturamentoLinha> porProfissional = List.of();
+        if (financeiroLiberado) {
+            Map<String, BigDecimal> precos = precosPorNome(tenantId);
+            receita30 = atendidos.stream()
+                    .map(a -> precoDe(a, precos)).reduce(BigDecimal.ZERO, BigDecimal::add);
+            porServico = agrupar(atendidos, Agendamento::getServico, precos);
+            porProfissional = agrupar(atendidos,
+                    a -> a.getProfissional() != null ? a.getProfissional() : "Sem profissional", precos);
+        }
 
         return new RelatorioDto(proximos7, realizados, faltas, cancelados, taxaFalta, servicosTop,
-                receita30, porServico, porProfissional);
+                receita30, porServico, porProfissional, financeiroLiberado);
     }
 
     /** Export CSV: atendimentos realizados dos últimos 30 dias, com preço (abre no Excel BR). */
     @GetMapping("/financeiro.csv")
     public ResponseEntity<byte[]> financeiroCsv() {
         UUID tenantId = TenantContext.get();
+        planoService.exigir(tenantId, Plano.Recurso.FINANCEIRO);
         LocalDateTime agora = LocalDateTime.now();
         Map<String, BigDecimal> precos = precosPorNome(tenantId);
         DateTimeFormatter fData = DateTimeFormatter.ofPattern("dd/MM/yyyy");

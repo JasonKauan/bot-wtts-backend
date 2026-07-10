@@ -67,6 +67,7 @@ public class ProfissionalController {
      */
     private void validarGrade(ProfissionalRequest req) {
         if (!req.temGrade()) return;
+        planoService.exigir(TenantContext.get(), com.agendamento.backend.entity.Plano.Recurso.GRADE_PROFISSIONAL);
         if (req.horarioAbertura() == null || req.horarioFechamento() == null
                 || req.diasTrabalho() == null || req.diasTrabalho().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

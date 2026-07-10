@@ -4,9 +4,11 @@ import com.agendamento.backend.dto.api.BloqueioDto;
 import com.agendamento.backend.dto.api.BloqueioRequest;
 import com.agendamento.backend.entity.Bloqueio;
 import com.agendamento.backend.entity.Profissional;
+import com.agendamento.backend.entity.Plano;
 import com.agendamento.backend.repository.BloqueioRepository;
 import com.agendamento.backend.repository.ProfissionalRepository;
 import com.agendamento.backend.security.TenantContext;
+import com.agendamento.backend.service.PlanoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,6 +29,7 @@ public class BloqueioController {
 
     private final BloqueioRepository repo;
     private final ProfissionalRepository profissionalRepository;
+    private final PlanoService planoService;
 
     @GetMapping
     public List<BloqueioDto> listar() {
@@ -55,6 +58,7 @@ public class BloqueioController {
         }
         Profissional prof = null;
         if (req.profissionalId() != null) {
+            planoService.exigir(tenantId, Plano.Recurso.FOLGA_PROFISSIONAL);
             prof = profissionalRepository.findById(req.profissionalId())
                     .filter(p -> p.getTenantId().equals(tenantId))
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Profissional inválido."));

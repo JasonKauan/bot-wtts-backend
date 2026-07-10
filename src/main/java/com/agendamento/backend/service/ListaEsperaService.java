@@ -60,6 +60,7 @@ public class ListaEsperaService {
     public void notificarProximo(Tenant tenant, LocalDate dataLiberada) {
         try {
             if (dataLiberada == null || dataLiberada.isBefore(LocalDate.now())) return;
+            if (!tenant.getPlano().permite(com.agendamento.backend.entity.Plano.Recurso.LISTA_ESPERA)) return;
             List<ListaEspera> fila = listaEsperaRepository
                     .findByTenantIdAndDataOrderByCriadoEmAsc(tenant.getId(), dataLiberada);
             for (ListaEspera e : fila) {
