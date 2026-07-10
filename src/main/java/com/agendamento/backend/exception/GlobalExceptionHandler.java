@@ -39,4 +39,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest()
                 .body(Map.of("status", 400, "message", message));
     }
+
+    /**
+     * Violação de integridade (FK/unique no banco) → 409 legível em vez de 500 cru.
+     * Foi o sintoma do excluir-profissional antes da V29; fica como rede de segurança.
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleIntegridade(
+            org.springframework.dao.DataIntegrityViolationException ex) {
+        return ResponseEntity.status(409).body(Map.of("status", 409,
+                "message", "Não foi possível concluir: existem registros vinculados a esse item."));
+    }
 }
