@@ -58,10 +58,59 @@ public class BotService {
     private final PlanoService            planoService;
     private final AiService               aiService;
     private final ListaEsperaService      listaEsperaService;
+    private final BotMensagemService      botMensagemService;
+
+    /** Resposta capturada no test-drive do painel. paraDono = aviso que iria pro WhatsApp do dono. */
+    public record RespostaSimulada(String texto, boolean paraDono) {}
+
+    /** Telefone reservado do simulador — a sessão é única por (telefone, tenant). */
+    private static final String TELEFONE_SIMULADOR = "simulador";
+
+    /** Respostas sendo capturadas numa SIMULAÇÃO. Null = conversa real (envia via Evolution). */
+    private static final ThreadLocal<List<RespostaSimulada>> SIMULACAO = new ThreadLocal<>();
+
+    /** [telefone, nome] do cliente da conversa atual — enviar() loga só o que vai pro CLIENTE. */
+    private static final ThreadLocal<String[]> CONVERSA = new ThreadLocal<>();
 
     @Async
     @Transactional
     public void processMessage(String telefone, String mensagem, String clienteNome, Tenant tenant) {
+        botMensagemService.registrar(tenant.getId(), telefone, clienteNome, true, mensagem);   // histórico (V28)
+        CONVERSA.set(new String[]{telefone, clienteNome});
+        try {
+            processar(telefone, mensagem, clienteNome, tenant, false);
+        } finally {
+            CONVERSA.remove();
+        }
+    }
+
+    /**
+     * Test-drive do painel (V27+): roda o fluxo REAL do bot capturando as respostas.
+     * Nada é enviado pelo WhatsApp e nenhum agendamento é salvo — só a sessão do
+     * telefone reservado "simulador" evolui (pra conversa ter continuidade).
+     */
+    @Transactional
+    public List<RespostaSimulada> simular(Tenant tenant, String mensagem) {
+        List<RespostaSimulada> respostas = new ArrayList<>();
+        SIMULACAO.set(respostas);
+        try {
+            processar(TELEFONE_SIMULADOR, mensagem, "Cliente Teste", tenant, true);
+        } finally {
+            SIMULACAO.remove();
+        }
+        return respostas;
+    }
+
+    /** Recomeça o test-drive: apaga a sessão do simulador. */
+    @Transactional
+    public void resetarSimulacao(Tenant tenant) {
+        botSessionRepository.findByTelefoneAndTenantId(TELEFONE_SIMULADOR, tenant.getId())
+                .ifPresent(botSessionRepository::delete);
+    }
+
+    private boolean emSimulacao() { return SIMULACAO.get() != null; }
+
+    private void processar(String telefone, String mensagem, String clienteNome, Tenant tenant, boolean simulacao) {
         log.info("[{}] Mensagem de {}: {}", tenant.getId(), telefone, mensagem);
 
         // 0. Modo ATENDENTE HUMANO: o bot fica fora da conversa por 1h (renova a cada mensagem).
@@ -82,9 +131,10 @@ public class BotService {
             botSessionRepository.delete(humano);       // expirou — volta ao fluxo normal, sem alarde
         }
 
-        // 1. Horário de atendimento (usa config do tenant)
+        // 1. Horário de atendimento (usa config do tenant) — a simulação pula, senão o dono
+        // testando à noite só veria "estamos fechados".
         int hora = LocalDateTime.now().getHour();
-        if (hora < tenant.getHorarioAbertura() || hora >= tenant.getHorarioFechamento()) {
+        if (!simulacao && (hora < tenant.getHorarioAbertura() || hora >= tenant.getHorarioFechamento())) {
             int ab = tenant.getHorarioAbertura(), fe = tenant.getHorarioFechamento();
             String ai = aiService.redigir("Estamos fora do horario de atendimento agora. Atendemos das "
                     + ab + "h as " + fe + "h. Avise o cliente com gentileza e peca pra mandar *oi* dentro desse horario.");
@@ -499,7 +549,7 @@ public class BotService {
             enviar(tenant, telefone, "Esse dia já passou 😅 Me diz outra data que eu vejo pra você!");
             return;
         }
-        boolean entrou = listaEsperaService.entrar(tenant, telefone, clienteNome,
+        boolean entrou = emSimulacao() || listaEsperaService.entrar(tenant, telefone, clienteNome,
                 s.getServicoEscolhido(), s.getProfissionalId(), s.getProfissionalEscolhido(), dia);
         enviar(tenant, telefone, (entrou
                 ? "🔔 Fechado! Se abrir vaga em *" + formatarData(dia) + "* eu te chamo aqui na hora."
@@ -586,7 +636,7 @@ public class BotService {
         }
         if ("sim".equals(norm) || "s".equals(norm)) {
             // Limite de plano só vale pra agendamento NOVO (remarcar apenas move um existente).
-            if (session.getRemarcandoId() == null) {
+            if (session.getRemarcandoId() == null && !emSimulacao()) {
                 try {
                     planoService.validarNovoAgendamento(tenant); // Iteração 6: limite do plano
                 } catch (LimitePlanoException e) {
@@ -611,6 +661,15 @@ public class BotService {
                 enviar(tenant, telefone, disp.isEmpty()
                         ? "Ihh, esse horário acabou de ser reservado 😕 E não sobrou mais nada nesse dia. Qual outra data?"
                         : "Ihh, esse horário acabou de ser reservado 😕 Mas ainda tenho " + juntarHorarios(disp) + " — qual prefere?");
+                return;
+            }
+
+            // SIMULAÇÃO: responde como se tivesse agendado, mas nada entra na agenda de verdade.
+            if (emSimulacao()) {
+                botSessionRepository.delete(session);
+                enviar(tenant, telefone, "✅ Prontinho, agendado! Te espero 😊\n\n"
+                        + "🔔 Ah, e não se preocupa em esquecer: eu te lembro no dia! 😉\n\n"
+                        + "🧪 _Isso é um teste — nada foi salvo na sua agenda._");
                 return;
             }
 
@@ -652,6 +711,7 @@ public class BotService {
                     .profissional(session.getProfissionalEscolhido())
                     .profissionalId(session.getProfissionalId())
                     .duracaoMinutos(duracao)
+                    .origem("BOT")   // ROI na dashboard (V27)
                     .dataHora(dataHora).status(fila ? "PENDENTE" : "CONFIRMADO").build();
             agendamentoRepository.save(ag);
             String servicoOk = session.getServicoEscolhido();
@@ -994,6 +1054,17 @@ public class BotService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void enviar(Tenant tenant, String telefone, String texto) {
+        // Simulação: captura em vez de enviar (inclusive avisos que iriam pro dono).
+        List<RespostaSimulada> cap = SIMULACAO.get();
+        if (cap != null) {
+            cap.add(new RespostaSimulada(texto, telefone.equals(tenant.getTelefoneWhatsapp())));
+            return;
+        }
+        // Histórico (V28): loga só o que vai pro CLIENTE da conversa atual (aviso ao dono fica de fora).
+        String[] conversa = CONVERSA.get();
+        if (conversa != null && telefone.equals(conversa[0])) {
+            botMensagemService.registrar(tenant.getId(), telefone, conversa[1], false, texto);
+        }
         evolutionApiService.enviarMensagemNaInstancia(tenant.getId().toString(), telefone, texto);
     }
 

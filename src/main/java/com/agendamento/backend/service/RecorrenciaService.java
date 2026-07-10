@@ -86,6 +86,7 @@ public class RecorrenciaService {
                             .duracaoMinutos(dur)
                             .dataHora(dataHora)
                             .status("CONFIRMADO")
+                            .origem("FIXO")
                             .build());
                     criados++;
                     log.info("[Recorrencia] Gerado {} em {} (tenant {})", r.getClienteNome(), dataHora, t.getId());

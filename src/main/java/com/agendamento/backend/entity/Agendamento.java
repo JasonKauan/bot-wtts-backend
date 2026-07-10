@@ -44,6 +44,11 @@ public class Agendamento {
     @Column(nullable = false)
     private String status;
 
+    /** Quem criou (V27): BOT (cliente pelo WhatsApp) | MANUAL (dono no painel) | FIXO (recorrência). */
+    @Column(nullable = false)
+    @Builder.Default
+    private String origem = "MANUAL";
+
     @Column(name = "lembrete_enviado", nullable = false)
     @Builder.Default
     private boolean lembreteEnviado = false;

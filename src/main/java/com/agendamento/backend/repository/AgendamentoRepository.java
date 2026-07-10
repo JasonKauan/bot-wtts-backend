@@ -72,6 +72,10 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     long countByTenantIdAndClienteTelefoneAndStatusAndDataHoraAfter(
             UUID tenantId, String clienteTelefone, String status, LocalDateTime depois);
 
+    /** ROI do bot (V27): agendamentos por origem criados na janela. */
+    List<Agendamento> findByTenantIdAndOrigemAndCriadoEmGreaterThanEqual(
+            UUID tenantId, String origem, LocalDateTime inicio);
+
     /** CRM leve: todo o histórico do tenant (agregado em memória — volume pequeno por estabelecimento). */
     List<Agendamento> findByTenantId(UUID tenantId);
 }
