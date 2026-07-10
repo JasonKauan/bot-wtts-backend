@@ -46,6 +46,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/webhook/**").permitAll()
                 .requestMatchers("/api/admin/login").permitAll()
+                // Keep-alive/health: público e baratíssimo (não toca banco) — alvo do UptimeRobot.
+                .requestMatchers("/api/ping").permitAll()
                 // Só o CEO: visão financeira, gestão de vendedores, auditoria e utilidades.
                 .requestMatchers("/api/admin/ceo/**", "/api/admin/vendedores/**",
                         "/api/admin/auditoria", "/api/admin/lembretes/**").hasRole("SUPERADMIN")
