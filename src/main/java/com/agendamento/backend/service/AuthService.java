@@ -88,6 +88,34 @@ public class AuthService {
         return tenant;
     }
 
+    /**
+     * Multi-unidade (V34): cria um tenant NOVO (trial + instância Evolution + webhook)
+     * SEM criar usuário — o dono existente acessa via unidade_vinculo.
+     */
+    @Transactional
+    public Tenant criarUnidade(String nome, String telefoneWhatsapp) {
+        Tenant tenant = Tenant.builder()
+                .nome(nome)
+                .telefoneWhatsapp(telefoneWhatsapp)
+                .webhookSecret(UUID.randomUUID().toString().replace("-", ""))
+                .ativo(true)
+                .plano(Plano.TRIAL)
+                .trialExpiraEm(LocalDateTime.now().plusDays(TRIAL_DIAS_PADRAO))
+                .build();
+        tenantRepository.save(tenant);
+
+        String instanceName = tenant.getId().toString();
+        try {
+            evolutionApiService.criarInstancia(instanceName);
+            evolutionApiService.configurarWebhook(instanceName, tenant.getWebhookSecret());
+        } catch (Exception e) {
+            log.error("Erro ao criar instância Evolution para a unidade {}: {}", tenant.getId(), e.getMessage());
+            // não falha — dá pra conectar depois em /conectar
+        }
+        log.info("Unidade criada: {} ({})", tenant.getNome(), tenant.getId());
+        return tenant;
+    }
+
     public AuthResponse login(LoginRequest req) {
         Usuario usuario = usuarioRepository.findByEmail(req.getEmail())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciais inválidas."));
