@@ -80,6 +80,10 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, UUID> 
     boolean existsByTenantIdAndProfissionalIdAndStatusInAndDataHoraAfter(
             UUID tenantId, UUID profissionalId, java.util.Collection<String> status, LocalDateTime dataHora);
 
+    /** Excluir serviço: barra se há horário futuro ativo com esse serviço (guardado por nome). */
+    boolean existsByTenantIdAndServicoAndStatusInAndDataHoraAfter(
+            UUID tenantId, String servico, java.util.Collection<String> status, LocalDateTime dataHora);
+
     /** CRM leve: todo o histórico do tenant (agregado em memória — volume pequeno por estabelecimento). */
     List<Agendamento> findByTenantId(UUID tenantId);
 }

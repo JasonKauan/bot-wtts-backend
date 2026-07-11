@@ -16,4 +16,7 @@ public interface RecorrenciaRepository extends JpaRepository<Recorrencia, UUID> 
 
     /** Excluir profissional: barra se algum cliente fixo ativo depende dele. */
     boolean existsByTenantIdAndProfissionalIdAndAtivoTrue(UUID tenantId, UUID profissionalId);
+
+    /** Excluir serviço: barra se algum cliente fixo ativo usa esse serviço (guardado por nome). */
+    boolean existsByTenantIdAndServicoAndAtivoTrue(UUID tenantId, String servico);
 }

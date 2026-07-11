@@ -345,7 +345,7 @@ public class BotService {
                 sb.append("• *").append(a.getServico()).append("*");
                 if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
                 sb.append(" — ").append(formatarDataHora(a.getDataHora()));
-                if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando confirmação)_");
+                if ("PENDENTE".equals(a.getStatus())) sb.append(" (aguardando confirmação)");
                 sb.append("\n");
             }
             sb.append("\nQuer *remarcar* ou *cancelar*? É só responder uma das duas 😊");
@@ -474,11 +474,11 @@ public class BotService {
                     escolher("Qual serviço você quer? 😊", "Me diz o que você quer fazer:", "Pra começar, qual serviço? 😊")
                     + "\n\n" + formatarServicos(servicoRepository.findByTenantIdAndAtivoTrue(tenant.getId()))
                     + (tenant.isPermiteCombo() && tenant.getPlano().permite(Plano.Recurso.COMBOS)
-                            ? "\n\n_Pode pedir mais de um, ex.: \"corte e barba\"_ 😉" : ""));
+                            ? "\n\nPode pedir mais de um, ex.: \"corte e barba\" 😉" : ""));
             case "PROFISSIONAL" -> enviar(tenant, telefone,
                     resumoParcial(s) + "👤 Com qual profissional?\n\n" + formatarProfissionais(profissionalRepository.findByTenantIdAndAtivoTrue(tenant.getId())));
             case "DATA" -> enviar(tenant, telefone,
-                    resumoParcial(s) + "📅 Pra qual dia? _(hoje, amanhã ou dd/mm)_");
+                    resumoParcial(s) + "📅 Pra qual dia? (hoje, amanhã ou dd/mm)");
             case "HORA" -> {
                 List<String> disp = dispDaSessao(tenant, s.getDataEscolhida(), s);
                 if (disp.isEmpty()) { trocarParaProximaData(s, telefone, tenant); return; }
@@ -519,7 +519,7 @@ public class BotService {
                 && tenant.getPlano().permite(Plano.Recurso.LISTA_ESPERA)) {
             s.setEsperaData(cheia);
             botSessionRepository.save(s);
-            espera = "\n\n_Ou responda *avisa* que eu te chamo se abrir vaga em " + formatarData(cheia) + "._";
+            espera = "\n\nOu responda *avisa* que eu te chamo se abrir vaga em " + formatarData(cheia) + ".";
         }
         enviar(tenant, telefone, motivo + sugestao + espera);
     }
@@ -554,7 +554,7 @@ public class BotService {
         enviar(tenant, telefone, (entrou
                 ? "🔔 Fechado! Se abrir vaga em *" + formatarData(dia) + "* eu te chamo aqui na hora."
                 : "Você já está na fila de *" + formatarData(dia) + "* — te aviso se abrir vaga 😉")
-                + "\n\nEnquanto isso, quer garantir outro dia? _(hoje, amanhã ou dd/mm)_");
+                + "\n\nEnquanto isso, quer garantir outro dia? (hoje, amanhã ou dd/mm)");
     }
 
     /** Escudo anti-faltão (V23): N+ faltas nos últimos 90 dias → exige aprovação do dono. */
@@ -657,7 +657,7 @@ public class BotService {
                 botSessionRepository.delete(session);
                 enviar(tenant, telefone, "✅ Prontinho, agendado! Te espero 😊\n\n"
                         + "🔔 Ah, e não se preocupa em esquecer: eu te lembro no dia! 😉\n\n"
-                        + "🧪 _Isso é um teste — nada foi salvo na sua agenda._");
+                        + "🧪 Isso é um teste — nada foi salvo na sua agenda.");
                 return;
             }
 
@@ -738,7 +738,7 @@ public class BotService {
             }
             erroComTentativa(session, telefone, tenant,
                     "Só pra confirmar: responda *sim* 👍 pra agendar, ou *não* pra cancelar.\n" +
-                    "_(ou me diga o que mudar, ex.: \"muda pra 16h\" ou \"na verdade quero terça\")_");
+                    "(ou me diga o que mudar, ex.: \"muda pra 16h\" ou \"na verdade quero terça\")");
         }
     }
 
@@ -869,7 +869,7 @@ public class BotService {
 
         enviar(tenant, telefone,
                 "🙋 Combinado! Já avisei o pessoal aqui — assim que possível alguém te responde por esta mesma conversa.\n\n"
-                + "_(Pra voltar a falar comigo, é só mandar *menu*.)_");
+                + "(Pra voltar a falar comigo, é só mandar *menu*.)");
 
         String donoFone = tenant.getTelefoneWhatsapp();
         if (donoFone != null && !donoFone.isBlank()) {
@@ -899,7 +899,7 @@ public class BotService {
             sb.append("• *").append(a.getServico()).append("*");
             if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
             sb.append(" — ").append(formatarDataHora(a.getDataHora()));
-            if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando confirmação)_");
+            if ("PENDENTE".equals(a.getStatus())) sb.append(" (aguardando confirmação)");
             sb.append("\n");
         }
         sb.append("\nPra mudar, responda *remarcar* ou *cancelar*. 😊");
@@ -1175,7 +1175,7 @@ public class BotService {
             if (sv.getPreco() != null) {
                 sb.append(" — R$ ").append(String.format(java.util.Locale.forLanguageTag("pt-BR"), "%.2f", sv.getPreco()));
             }
-            sb.append(" _(").append(sv.getDuracaoMinutos()).append(" min)_\n");
+            sb.append(" (").append(sv.getDuracaoMinutos()).append(" min)\n");
         }
         return sb.toString().trim();
     }
@@ -1187,7 +1187,7 @@ public class BotService {
             sb.append(i + 1).append(". ").append(p.getNome());
             // Grade própria: mostra os dias — o cliente já escolhe sabendo quando ele atende.
             String dias = diasCurto(p.getDiasTrabalho());
-            if (dias != null) sb.append(" _(").append(dias).append(")_");
+            if (dias != null) sb.append(" (").append(dias).append(")");
             sb.append("\n");
         }
         return sb.toString().trim();

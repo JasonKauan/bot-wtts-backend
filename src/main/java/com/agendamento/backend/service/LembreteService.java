@@ -159,7 +159,7 @@ public class LembreteService {
             sb.append("\n⏰ *").append(a.getDataHora().format(FMT_HORA)).append("* — ").append(a.getServico());
             if (a.getProfissional() != null) sb.append(" com ").append(a.getProfissional());
             sb.append(" · ").append(a.getClienteNome());
-            if ("PENDENTE".equals(a.getStatus())) sb.append(" _(aguardando aprovação)_");
+            if ("PENDENTE".equals(a.getStatus())) sb.append(" (aguardando aprovação)");
         }
         sb.append("\n\nTotal: *").append(doDia.size()).append(doDia.size() == 1 ? "* atendimento" : "* atendimentos")
           .append(". Bom trabalho! 💪");
@@ -171,7 +171,7 @@ public class LembreteService {
         return "⏰ Oi " + ag.getClienteNome() + "! Passando pra lembrar do seu horário de *hoje*:\n"
                 + "✂️ " + ag.getServico() + profTexto
                 + " às " + ag.getDataHora().format(FMT_HORA)
-                + "\n\nTe esperamos! 😊\n_(Se não puder vir, responda *cancelar*.)_";
+                + "\n\nTe esperamos! 😊\n(Se não puder vir, responda *cancelar*.)";
     }
 
     private String montarMensagem(Agendamento ag, Tenant tenant) {
