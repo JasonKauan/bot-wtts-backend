@@ -9,5 +9,6 @@ public record ClienteCrmDto(
         long visitas,            // confirmados que já aconteceram
         long faltas,             // não compareceu
         LocalDateTime ultimaVisita,
-        LocalDateTime proximoAgendamento
+        LocalDateTime proximoAgendamento,
+        String aniversario       // "dd/mm" (V33) ou nulo
 ) {}

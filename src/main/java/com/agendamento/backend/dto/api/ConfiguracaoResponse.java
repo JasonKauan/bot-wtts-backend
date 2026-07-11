@@ -17,4 +17,11 @@ public record ConfiguracaoResponse(
         int antecedenciaMinHoras,
         boolean resumoDiario,
         int faltasParaAprovacao,
-        boolean permiteCombo) {}
+        boolean permiteCombo,
+        boolean paginaPublica,
+        String slug,
+        int reativacaoDias,
+        String reativacaoMsg,
+        boolean aniversarioAtivo,
+        String aniversarioMsg,
+        int nivelPlano) {}   // 1=Gold 2=Platinum 3=Diamond/Trial — o front mostra/oculta seções

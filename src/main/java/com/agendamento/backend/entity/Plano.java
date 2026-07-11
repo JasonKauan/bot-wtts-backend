@@ -28,7 +28,11 @@ public enum Plano {
         CRM(2),                  // aba Clientes
         RECORRENCIA(3),          // clientes fixos
         FINANCEIRO(3),           // relatório financeiro + CSV
-        CONVERSAS(3);            // histórico das conversas do bot
+        CONVERSAS(3),            // histórico das conversas do bot
+        PAGINA_PUBLICA(3),       // link público de agendamento (bio do Instagram)
+        REATIVACAO(3),           // "sentimos sua falta" pra cliente sumido
+        ANIVERSARIO(3),          // parabéns automático com mimo
+        MULTI_UNIDADE(3);        // 2+ estabelecimentos numa conta
 
         private final int nivelMinimo;
         Recurso(int nivelMinimo) { this.nivelMinimo = nivelMinimo; }

@@ -48,6 +48,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/login").permitAll()
                 // Keep-alive/health: público e baratíssimo (não toca banco) — alvo do UptimeRobot.
                 .requestMatchers("/api/ping").permitAll()
+                // Página pública de agendamento (V31): sem login; rate-limit e validações no controller.
+                .requestMatchers("/api/publico/**").permitAll()
                 // Só o CEO: visão financeira, gestão de vendedores, auditoria e utilidades.
                 .requestMatchers("/api/admin/ceo/**", "/api/admin/vendedores/**",
                         "/api/admin/auditoria", "/api/admin/lembretes/**").hasRole("SUPERADMIN")

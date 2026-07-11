@@ -17,5 +17,12 @@ public record ConfiguracaoRequest(
         @Min(0) @Max(72) int antecedenciaMinHoras, // 0 = sem regra
         boolean resumoDiario,                     // agenda do dia no WhatsApp do dono (V20)
         @Min(0) @Max(10) int faltasParaAprovacao, // escudo anti-faltão (V23); 0 = desligado
-        boolean permiteCombo                      // "corte e barba" num agendamento só (V25)
+        boolean permiteCombo,                     // "corte e barba" num agendamento só (V25)
+        // ── Recursos Diamond (V31–V33) ──
+        boolean paginaPublica,                    // link público de agendamento
+        String slug,                              // /agendar/{slug}
+        @Min(0) @Max(365) int reativacaoDias,     // 0 = reativação desligada
+        String reativacaoMsg,                     // nulo/vazio = template padrão
+        boolean aniversarioAtivo,
+        String aniversarioMsg
 ) {}

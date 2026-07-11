@@ -82,6 +82,32 @@ public class Tenant {
     @Builder.Default
     private boolean permiteCombo = true;
 
+    // ── Recursos Diamond (V31–V33) — todos opcionais/desligados por padrão ──────
+
+    /** Slug da página pública de agendamento (/agendar/{slug}). Nulo = nunca ativada. */
+    @Column(unique = true)
+    private String slug;
+
+    @Column(name = "pagina_publica", nullable = false)
+    @Builder.Default
+    private boolean paginaPublica = false;
+
+    /** Reativação de sumidos: dias sem visita pra disparar o "sentimos sua falta". 0 = desligado. */
+    @Column(name = "reativacao_dias", nullable = false)
+    @Builder.Default
+    private int reativacaoDias = 0;
+
+    /** Mensagem custom da reativação ({nome} e {estabelecimento} são substituídos). Nulo = padrão. */
+    @Column(name = "reativacao_msg")
+    private String reativacaoMsg;
+
+    @Column(name = "aniversario_ativo", nullable = false)
+    @Builder.Default
+    private boolean aniversarioAtivo = false;
+
+    @Column(name = "aniversario_msg")
+    private String aniversarioMsg;
+
     /** Última data em que o resumo diário foi enviado (dedupe do job). */
     @Column(name = "resumo_enviado_em")
     private java.time.LocalDate resumoEnviadoEm;

@@ -9,6 +9,9 @@ import java.util.UUID;
 public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     List<Tenant> findByAtivoTrue();
 
+    /** Página pública de agendamento (V31): resolve o tenant pelo slug do link. */
+    java.util.Optional<Tenant> findBySlug(String slug);
+
     /** Lista de clientes do painel admin — mais recentes primeiro. */
     List<Tenant> findAllByOrderByCriadoEmDesc();
 }
