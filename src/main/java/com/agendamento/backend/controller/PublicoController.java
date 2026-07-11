@@ -111,6 +111,16 @@ public class PublicoController {
                     "WhatsApp inválido — use DDD + número (ex.: 11999998888).");
         }
 
+        // Anti-flood: um telefone não pode acumular muitos horários futuros nesta agenda
+        // (barra bot enchendo a agenda com reservas falsas pela página pública).
+        long futurosDoTelefone = agendamentoRepository
+                .findByTenantIdAndClienteTelefoneAndStatusInAndDataHoraAfterOrderByDataHora(
+                        t.getId(), telefone, List.of("CONFIRMADO", "PENDENTE"), LocalDateTime.now()).size();
+        if (futurosDoTelefone >= 3) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Esse número já tem horários marcados aqui. Fale com o estabelecimento pra marcar mais.");
+        }
+
         int dur = Math.max(1, servico.getDuracaoMinutos());
         // O horário TEM que estar na grade livre (cobre grade, folga, conflito e passado).
         if (!disponibilidadeService.horariosDisponiveis(t, req.data(),

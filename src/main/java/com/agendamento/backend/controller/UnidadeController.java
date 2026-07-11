@@ -72,6 +72,12 @@ public class UnidadeController {
         Usuario u = donoLogado(auth);
         planoService.exigir(TenantContext.get(), Plano.Recurso.MULTI_UNIDADE);
 
+        // Teto anti-abuso: cada unidade abre uma instância Evolution (recurso compartilhado).
+        if (vinculoRepository.countByUsuarioId(u.getId()) >= 10) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Você atingiu o limite de unidades. Fale com o suporte se precisar de mais.");
+        }
+
         Tenant nova = authService.criarUnidade(req.nome().trim(), req.telefoneWhatsapp());
         vinculoRepository.save(UnidadeVinculo.builder()
                 .usuarioId(u.getId()).tenantId(nova.getId()).build());

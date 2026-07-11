@@ -11,4 +11,7 @@ public interface UnidadeVinculoRepository extends JpaRepository<UnidadeVinculo, 
     List<UnidadeVinculo> findByUsuarioId(UUID usuarioId);
 
     boolean existsByUsuarioIdAndTenantId(UUID usuarioId, UUID tenantId);
+
+    /** Teto de unidades por usuário (anti-abuso de criação em massa). */
+    long countByUsuarioId(UUID usuarioId);
 }
