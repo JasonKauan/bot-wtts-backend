@@ -63,12 +63,12 @@ public class AssinaturaService {
 
         String emailPagador = usuarioRepository.findFirstByTenantId(t.getId())
                 .map(u -> u.getEmail())
-                .orElse("pagador@agendabot.local");
+                .orElse("pagador@chadbot.local");
 
         MercadoPagoService.PixCriado pix;
         try {
             pix = mercadoPagoService.criarPix(pagamento, emailPagador,
-                    "AgendaBot — Plano " + plano + " (" + pagamento.getMesReferencia() + ")");
+                    "Chadbot — Plano " + plano.getNomeBonito() + " (" + pagamento.getMesReferencia() + ")");
         } catch (RestClientException e) {
             log.error("Falha ao criar PIX no Mercado Pago para tenant {}: {}", t.getId(), e.getMessage());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Falha ao gerar o PIX. Tente novamente.");

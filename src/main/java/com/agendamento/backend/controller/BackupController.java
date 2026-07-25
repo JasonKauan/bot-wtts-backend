@@ -44,7 +44,7 @@ public class BackupController {
     public ResponseEntity<byte[]> backup() throws Exception {
         Map<String, Object> dump = new LinkedHashMap<>();
         dump.put("geradoEm", LocalDateTime.now().toString());
-        dump.put("formato", "agendabot-backup-v1");
+        dump.put("formato", "chadbot-backup-v1");
         dump.put("tenant", tenantRepository.findAll());
         dump.put("usuario", usuarioRepository.findAll());
         dump.put("servico", servicoRepository.findAll());
@@ -62,7 +62,7 @@ public class BackupController {
                 .writeValueAsString(dump).getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=backup-agendabot-" + LocalDate.now() + ".json")
+                        "attachment; filename=backup-chadbot-" + LocalDate.now() + ".json")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(corpo);
     }

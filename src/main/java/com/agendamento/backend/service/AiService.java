@@ -87,7 +87,7 @@ public class AiService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(apiKey);
-            headers.set("X-Title", "AgendaBot");
+            headers.set("X-Title", "Chadbot");
 
             Map<?, ?> resp = http.postForObject(url, new HttpEntity<>(body, headers), Map.class);
             if (resp != null && resp.get("choices") instanceof List<?> choices && !choices.isEmpty()
