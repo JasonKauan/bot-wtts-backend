@@ -33,6 +33,7 @@ public class AuthService {
     private final EvolutionApiService evolutionApiService;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
+    private final com.agendamento.backend.repository.TrialRegistroRepository trialRegistroRepository;
 
     @Transactional
     public AuthResponse register(RegisterRequest req) {
@@ -55,15 +56,28 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "E-mail já cadastrado.");
         }
 
+        // Trial único por número (V35): número que já consumiu trial → conta nasce VENCIDA
+        // (funciona, mas cai direto na tela de assinatura). Quem é honesto nem percebe.
+        String foneNormalizado = telefoneWhatsapp == null ? "" : telefoneWhatsapp.replaceAll("\\D", "");
+        boolean trialJaUsado = !foneNormalizado.isEmpty()
+                && trialRegistroRepository.findByTelefone(foneNormalizado).isPresent();
+
         Tenant tenant = Tenant.builder()
                 .nome(nomeEstabelecimento)
                 .telefoneWhatsapp(telefoneWhatsapp)
                 .webhookSecret(UUID.randomUUID().toString().replace("-", ""))
                 .ativo(true)
                 .plano(Plano.TRIAL)
-                .trialExpiraEm(LocalDateTime.now().plusDays(trialDias))
+                .trialExpiraEm(trialJaUsado ? LocalDateTime.now() : LocalDateTime.now().plusDays(trialDias))
                 .build();
         tenantRepository.save(tenant);
+
+        if (trialJaUsado) {
+            log.warn("[TrialUnico] Número {} já consumiu trial — tenant {} nasce vencido", foneNormalizado, tenant.getId());
+        } else if (!foneNormalizado.isEmpty()) {
+            trialRegistroRepository.save(com.agendamento.backend.entity.TrialRegistro.builder()
+                    .telefone(foneNormalizado).tenantId(tenant.getId()).build());
+        }
 
         Usuario usuario = Usuario.builder()
                 .tenantId(tenant.getId())

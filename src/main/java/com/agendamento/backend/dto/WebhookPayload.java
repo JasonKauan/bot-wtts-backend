@@ -16,6 +16,8 @@ public class WebhookPayload {
 
     private String event;
     private String instance;
+    /** JID do DONO da instância (o número real pareado) — Evolution v2 manda no topo do payload. */
+    private String sender;
     private MessageData data;
 
     @Data
@@ -74,6 +76,12 @@ public class WebhookPayload {
         return data.getKey().getRemoteJid()
                 .replace("@s.whatsapp.net", "")
                 .replace("@c.us", "");
+    }
+
+    /** Número REAL pareado na instância (só dígitos) — base do trial único (V35). Vazio se ausente. */
+    public String extractSenderPhone() {
+        if (sender == null) return "";
+        return sender.replace("@s.whatsapp.net", "").replace("@c.us", "").replaceAll("\\D", "");
     }
 
     /** ID único da mensagem no WhatsApp (para deduplicar reenvios da Evolution). */
