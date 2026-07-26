@@ -128,6 +128,14 @@ public class Tenant {
     @Column(name = "assinatura_expira_em")
     private LocalDateTime assinaturaExpiraEm;
 
+    /**
+     * Régua de cobrança (V37): menor marco de aviso já enviado neste ciclo — 5, 3, 1 ou 0
+     * dias para vencer. 99 = nenhum aviso ainda. Volta a 99 quando o plano é renovado.
+     */
+    @Column(name = "aviso_renovacao_marco", nullable = false)
+    @Builder.Default
+    private int avisoRenovacaoMarco = 99;
+
     @Column(name = "criado_em", nullable = false, updatable = false)
     private LocalDateTime criadoEm;
 

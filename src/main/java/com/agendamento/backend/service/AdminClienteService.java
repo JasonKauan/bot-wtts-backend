@@ -129,6 +129,7 @@ public class AdminClienteService {
         t.setPlano(req.getPlano());
         if (trial) t.setTrialExpiraEm(nova);
         else       t.setAssinaturaExpiraEm(nova);
+        t.setAvisoRenovacaoMarco(99);   // ciclo novo: a régua de cobrança recomeça (V37)
     }
 
     private String descricaoPlano(PlanoRequest req) {

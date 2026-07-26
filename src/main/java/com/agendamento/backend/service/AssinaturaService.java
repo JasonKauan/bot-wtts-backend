@@ -108,6 +108,7 @@ public class AssinaturaService {
             Tenant t = tenantRepository.findById(pagamento.getTenantId()).orElseThrow();
             t.setPlano(pagamento.getPlano());
             t.setAssinaturaExpiraEm(LocalDateTime.now().plusDays(30)); // bot-zap: hoje + 30 dias
+            t.setAvisoRenovacaoMarco(99);   // ciclo novo: a régua de cobrança recomeça (V37)
             tenantRepository.save(t);
             // PIX pago pelo cliente também é venda — comissão vai pro vendedor da carteira.
             vendaService.registrar(t, pagamento.getPlano(), "PIX");
