@@ -23,6 +23,10 @@ public interface VendaRepository extends JpaRepository<Venda, UUID> {
     /** Acerto parcial: pendentes do vendedor, da mais antiga pra mais nova (paga na ordem). */
     List<Venda> findByVendedorIdAndPagoFalseOrderByCriadoEmAsc(UUID vendedorId);
 
+    /** Limite de comissão (V36): quantas mensalidades deste cliente já comissionaram este vendedor. */
+    long countByTenantIdAndVendedorIdAndComissaoValorGreaterThan(
+            UUID tenantId, UUID vendedorId, java.math.BigDecimal minimo);
+
     /** Export CSV: histórico completo. */
     List<Venda> findAllByOrderByCriadoEmDesc();
 }

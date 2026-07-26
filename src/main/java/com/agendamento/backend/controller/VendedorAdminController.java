@@ -46,10 +46,12 @@ public class VendedorAdminController {
                 .senha(passwordEncoder.encode(req.getSenha()))
                 .role(AdminAuthService.ROLE_VENDEDOR)
                 .comissaoPct(req.getComissaoPct())
+                .comissaoMeses(req.getComissaoMeses() != null ? req.getComissaoMeses() : 2)
                 .ativo(true)
                 .build();
         usuarioRepository.save(v);
-        auditoriaService.registrar("CRIAR_VENDEDOR", null, v.getEmail(), "comissão " + v.getComissaoPct() + "%");
+        auditoriaService.registrar("CRIAR_VENDEDOR", null, v.getEmail(),
+                "comissão " + v.getComissaoPct() + "% por " + descreverLimite(v.getComissaoMeses()));
         return toDto(v);
     }
 
@@ -66,6 +68,10 @@ public class VendedorAdminController {
             v.setComissaoPct(req.getComissaoPct());
             detalhe.append("comissão ").append(req.getComissaoPct()).append("% ");
         }
+        if (req.getComissaoMeses() != null) {
+            v.setComissaoMeses(req.getComissaoMeses());
+            detalhe.append("por ").append(descreverLimite(req.getComissaoMeses())).append(" ");
+        }
         if (req.getAtivo() != null) {
             v.setAtivo(req.getAtivo());
             detalhe.append(req.getAtivo() ? "ativado " : "desativado ");
@@ -79,8 +85,13 @@ public class VendedorAdminController {
         return toDto(v);
     }
 
+    /** "2 mensalidades por cliente" / "sempre" — para a auditoria ficar legível. */
+    private String descreverLimite(int meses) {
+        return meses <= 0 ? "sempre" : meses + " mensalidade(s) por cliente";
+    }
+
     private VendedorDto toDto(Usuario u) {
         return new VendedorDto(u.getId(), u.getNome(), u.getEmail(), u.getComissaoPct(),
-                u.isAtivo(), u.getCriadoEm());
+                u.getComissaoMeses(), u.isAtivo(), u.getCriadoEm());
     }
 }

@@ -30,6 +30,14 @@ public class Usuario {
     @Column(name = "comissao_pct", precision = 5, scale = 2)
     private java.math.BigDecimal comissaoPct;
 
+    /**
+     * Quantas mensalidades PAGAS de cada cliente geram comissão para este vendedor (V36).
+     * A contagem é por par (cliente, vendedor): cada cliente novo reinicia. 0 = vitalício.
+     */
+    @Column(name = "comissao_meses", nullable = false)
+    @Builder.Default
+    private int comissaoMeses = 2;
+
     @Column(nullable = false, unique = true)
     private String email;
 

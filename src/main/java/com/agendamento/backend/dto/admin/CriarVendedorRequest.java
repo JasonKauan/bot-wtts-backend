@@ -23,4 +23,9 @@ public class CriarVendedorRequest {
     @DecimalMin(value = "0", message = "Comissão não pode ser negativa.")
     @DecimalMax(value = "100", message = "Comissão máxima é 100%.")
     private BigDecimal comissaoPct;
+
+    /** Mensalidades comissionadas por cliente. 0 = vitalício. Padrão 2. */
+    @Min(value = 0, message = "Não pode ser negativo.")
+    @Max(value = 60, message = "Máximo de 60 mensalidades.")
+    private Integer comissaoMeses;
 }

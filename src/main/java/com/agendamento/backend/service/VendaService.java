@@ -18,6 +18,11 @@ import java.math.RoundingMode;
  * Registra vendas (ativação/renovação de plano pago) com comissão calculada.
  * Atribuição: sempre o vendedor da CARTEIRA do cliente (tenant.vendedorId) —
  * vale tanto pra ativação manual quanto pro PIX pago pelo próprio cliente.
+ *
+ * Limite por cliente (V36): o vendedor comissiona apenas nas N primeiras mensalidades
+ * PAGAS de cada cliente que trouxe (`usuario.comissaoMeses`; 0 = vitalício). Passado o
+ * limite, a venda continua registrada no nome dele — pra saber quem trouxe — mas com
+ * comissão zero: a mensalidade fica 100% da casa.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,12 +39,21 @@ public class VendaService {
         BigDecimal valor = plano.getValorMensal();
         BigDecimal pct = BigDecimal.ZERO;
         String vendedorEmail = null;
+        boolean limiteAtingido = false;
 
         if (tenant.getVendedorId() != null) {
             Usuario vendedor = usuarioRepository.findById(tenant.getVendedorId()).orElse(null);
             if (vendedor != null) {
                 vendedorEmail = vendedor.getEmail();
-                if (vendedor.getComissaoPct() != null) pct = vendedor.getComissaoPct();
+
+                // Quantas mensalidades deste cliente já renderam comissão a este vendedor?
+                int limite = vendedor.getComissaoMeses();
+                if (limite > 0) {
+                    long jaComissionadas = vendaRepository.countByTenantIdAndVendedorIdAndComissaoValorGreaterThan(
+                            tenant.getId(), vendedor.getId(), BigDecimal.ZERO);
+                    limiteAtingido = jaComissionadas >= limite;
+                }
+                if (!limiteAtingido && vendedor.getComissaoPct() != null) pct = vendedor.getComissaoPct();
             }
         }
 
@@ -58,7 +72,8 @@ public class VendaService {
                 .origem(origem)
                 .build());
 
-        log.info("[venda] tenant {} plano {} R${} origem {} — vendedor {} comissão R${}",
-                tenant.getId(), plano, valor, origem, vendedorEmail, comissao);
+        log.info("[venda] tenant {} plano {} R${} origem {} — vendedor {} comissão R${}{}",
+                tenant.getId(), plano, valor, origem, vendedorEmail, comissao,
+                limiteAtingido ? " (limite de comissões deste cliente atingido)" : "");
     }
 }
